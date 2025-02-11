@@ -1,0 +1,60 @@
+Feature: Translate non-English text to English in the 'purgo_playground.other_language' table
+
+  Background:
+    Given the 'deep-translator' library is installed
+    And the 'purgo_playground.translated_other_language' table is dropped if it exists
+
+  Scenario: Translate non-English text to English
+    Given a PySpark DataFrame from the 'purgo_playground.other_language' table
+    When the language of each entry in the 'text' column is detected
+    And non-English text is translated to English using the GoogleTranslator class
+    Then the 'text' column is retained as is for English entries
+    And a new DataFrame is created with 'text' and 'translated_text' columns
+    And the DataFrame is saved and overwritten to 'purgo_playground.translated_other_language' with mergeSchema option set to true
+
+  Scenario Outline: Handle various language inputs
+    Given a text entry "<text>"
+    When the language is detected
+    Then the text is translated to "<translated_text>"
+
+    Examples:
+      | text                   | translated_text        |
+      | "Bonjour"              | "Hello"                |
+      | "Hola"                 | "Hello"                |
+      | "Hello"                | "Hello"                |
+      | "Guten Tag"            | "Good Day"             |
+      | "こんにちは"            | "Hello"                |
+
+  Scenario: Handle empty or null text entries
+    Given a text entry is empty or null
+    When the language detection is attempted
+    Then no translation is performed
+    And the entry remains unchanged in the 'translated_text' column
+
+  Scenario: Error handling during translation
+    Given a text entry "<text>"
+    When an error occurs during translation
+    Then an error message "<error_message>" is logged
+
+    Examples:
+      | text       | error_message                  |
+      | "Bonjour"  | "Translation service error"    |
+      | "Hola"     | "Translation service error"    |
+
+  Scenario: Validate translated data
+    Given a translated DataFrame
+    When the 'translated_text' column is checked
+    Then all entries should be in English
+    And the original English entries should match the translated entries
+
+  Scenario: Performance and scalability
+    Given a large dataset in the 'purgo_playground.other_language' table
+    When the translation process is executed
+    Then the process should complete within acceptable time limits
+    And the system should handle the data volume without errors
+
+  Scenario: Security and privacy
+    Given sensitive data in the 'text' column
+    When the translation process is executed
+    Then data privacy protocols should be followed
+    And no sensitive data should be exposed during translation
