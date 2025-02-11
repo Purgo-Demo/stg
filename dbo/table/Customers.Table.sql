@@ -1,0 +1,16 @@
+
+CREATE TABLE dbo.[Customers] (
+	[CustomerID] NCHAR(5) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, 
+	[CompanyName] NVARCHAR(40) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL, 
+	[ContactName] NVARCHAR(30) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[ContactTitle] NVARCHAR(30) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[Address] NVARCHAR(60) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[City] NVARCHAR(15) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[Region] NVARCHAR(15) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[PostalCode] NVARCHAR(10) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[Country] NVARCHAR(15) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[Phone] NVARCHAR(24) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	[Fax] NVARCHAR(24) COLLATE SQL_Latin1_General_CP1_CI_AS NULL, 
+	CONSTRAINT [PK_Customers] PRIMARY KEY ([CustomerID])
+)
+
