@@ -1,0 +1,55 @@
+Feature: Calculate Days on Hand (DOH) Usage for Inventory and Product Plants
+
+  Background:
+    Given the data source for inventory movement is "f_inv_movmnt" in schema "purgo_playground"
+    And the data source for sales is "f_sales" in schema "purgo_playground"
+    And the quarter is defined as a calendar quarter
+
+  Scenario Outline: Calculate Days on Hand (DOH)
+    Given the average inventory is calculated as <average_inventory> for the quarter 
+    And the average daily sales is calculated as <average_daily_sales> for the quarter
+    When I calculate DOH using the formula (Average Inventory / Average Daily Sales) * 365
+    Then the DOH should be <expected_doh>
+
+    Examples:
+      | average_inventory | average_daily_sales | expected_doh |
+      | 10000             | 100                 | 36500        |
+      | 5000              | 50                  | 36500        |
+
+  Scenario Outline: Calculate DOH KPI Metrics
+    Given the following DOH values <doh_values>
+    When I calculate the average DOH
+    And calculate the standard deviation of DOH
+    Then the average DOH should be <expected_average_doh>
+    And the standard deviation should be <expected_std_dev>
+
+    Examples:
+      | doh_values    | expected_average_doh | expected_std_dev |
+      | [36500, 36500] | 36500                | 0                |
+
+  Scenario: Error handling for missing data
+    Given there is no inventory movement data available for the quarter
+    When I attempt to calculate the DOH
+    Then an error message "Inventory movement data missing for the quarter" should be displayed
+
+  Scenario: Error handling for zero sales
+    Given the average daily sales is 0 for the quarter
+    When I attempt to calculate the DOH
+    Then an error message "Cannot calculate DOH with zero sales" should be displayed
+  
+  Scenario Outline: Validation of Input Values
+    Given the inventory movement data contains invalid values <invalid_inventory>
+    And the sales data contains invalid values <invalid_sales>
+    When I validate the data
+    Then an error message "Invalid data in inventory or sales" should be displayed
+
+    Examples:
+      | invalid_inventory | invalid_sales |
+      | "negative"        | "positive"    |
+      | "positive"        | "negative"    |
+  
+  Scenario: Output Specifications
+    Given the DOH calculations are stored using Databricks SQL
+    When the calculations are complete
+    Then the result should be stored in a table named "doh_results" in schema "purgo_playground"
+    And the table should have columns "quarter", "average_inventory", "average_daily_sales", "doh", "average_doh", "std_dev"
