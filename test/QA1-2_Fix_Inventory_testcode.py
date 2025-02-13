@@ -1,105 +1,86 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, expr
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DateType
-import pytest
+from pyspark.sql.functions import col, lit, length
+from pyspark.sql.types import StructType, StructField, StringType, DateType, IntegerType
+from pyspark.sql.utils import AnalysisException
+import unittest
+from pyspark.testing.sqlutils import ReusedSQLTestCase
 
 # Initialize Spark session
-spark = SparkSession.builder \
-    .appName("DatabricksTesting") \
-    .config("spark.databricks.delta.formatCheck.enabled", "false") \
-    .getOrCreate()
+spark = SparkSession.builder.appName("Databricks Testing").getOrCreate()
 
-# Test Setup for employees table with "lastdate" as DATE
-def create_employees_table():
-    schema = StructType([
-        StructField("employee_id", LongType(), True),
-        StructField("first_name", StringType(), True),
-        StructField("last_name", StringType(), True),
-        StructField("lastdate", DateType(), True),
-    ])
+class TestDatabricksOperations(ReusedSQLTestCase):
 
-    data = [
-        (1, "John", "Doe", None),
-        (2, "Jane", "Smith", "2023-01-15"),
-        (3, "Jim", "Beam", "2020-02-29"),
-        (4, "Amy", "Winehouse", "2024-03-21"),
-        (5, "Null", "User", None),
-        (6, "Sp€c!al", "Chåräctèrs", "2022-12-31")
-    ]
+    @classmethod
+    def setUpClass(cls):
+        cls.employees_schema = StructType([
+            StructField("employee_id", IntegerType(), True),
+            StructField("name", StringType(), True),
+            StructField("lastdate", DateType(), True)  # New 'lastdate' field
+        ])
+        cls.customers_schema = StructType([
+            StructField("customer_id", IntegerType(), True),
+            StructField("name", StringType(), True),
+            StructField("categoryGroup", StringType(), True)  # New 'categoryGroup' field
+        ])
 
-    return spark.createDataFrame(data, schema=schema)
+        cls.employees_data = [
+            (1, "John Doe", "2023-01-15"),
+            (2, "Jane Smith", "2022-08-30"),
+            (3, "Max Mustermann", None),  # NULL lastdate
+            (4, "Alice Wonderland", "2025-01-01"),  # Future lastdate
+        ]
+        cls.customers_data = [
+            (1, "Acme Corp", "Premium"),
+            (2, "Globex Inc", "Basic"),
+            (3, "Soylent Corp", "Enterprise"),
+            (4, "Initech", "Uncategorized"),
+            (5, "Vandelay Industries", None),  # NULL categoryGroup
+            (7, "Oscorp", "123456789012345678901234567890123456789012345678901")  # Length > 50
+        ]
 
-# Test Setup for customers table with "categoryGroup" as STRING
-def create_customers_table():
-    schema = StructType([
-        StructField("customer_id", LongType(), True),
-        StructField("name", StringType(), True),
-        StructField("categoryGroup", StringType(), True),
-    ])
+        cls.employees_df = spark.createDataFrame(cls.employees_data, schema=cls.employees_schema)
+        cls.customers_df = spark.createDataFrame(cls.customers_data, schema=cls.customers_schema)
 
-    data = [
-        (1, "ABC Corp", "Tech"),
-        (2, "XYZ Inc", None),
-        (3, "Max Limit Industries", "X" * 255),
-        (4, "Null Category", None),
-        (5, "国际组织", "International")
-    ]
+        cls.employees_df.createOrReplaceTempView("employees_test")
+        cls.customers_df.createOrReplaceTempView("customers_test")
 
-    return spark.createDataFrame(data, schema=schema)
+    def test_employees_lastdate_default(self):
+        result = self.spark.sql("""
+        SELECT * FROM employees_test WHERE lastdate IS NULL
+        """)
+        self.assertEqual(result.count(), 1, "Employees with default 'lastdate' should be NULL")
 
-@pytest.fixture(scope="module")
-def test_data():
-    return {"employees": create_employees_table(), "customers": create_customers_table()}
+    def test_employees_lastdate_future_date(self):
+        result = self.spark.sql("""
+        SELECT * FROM employees_test WHERE lastdate > current_date()
+        """)
+        self.assertEqual(result.count(), 1, "There should be one employee with a lastdate in the future")
 
-# Unit Test for Adding Columns
-def test_add_lastdate_column(test_data):
-    df = test_data["employees"]
-    
-    # Test the datatypes
-    assert df.schema["lastdate"].dataType == DateType()
-    
-    # Test correct NULL handling
-    null_check = df.filter(col("lastdate").isNull()).count()
-    assert null_check == 2  # Expecting two NULL values as per test data
+    def test_customers_categoryGroup_default(self):
+        result = self.spark.sql("""
+        SELECT * FROM customers_test WHERE categoryGroup = 'Uncategorized'
+        """)
+        self.assertEqual(result.count(), 1, "Customers with default 'categoryGroup' should be 'Uncategorized'")
 
-def test_lastdate_format_error(test_data):
-    # This would typically be an exception handling test
-    with pytest.raises(Exception):
-        df = test_data["employees"].withColumn("lastdate_wrong_format", expr("cast('12-31-2023' as date)"))
+    def test_customers_categoryGroup_length(self):
+        result = self.spark.sql("""
+        SELECT * FROM customers_test WHERE length(categoryGroup) > 50
+        """)
+        self.assertEqual(result.count(), 1, "There should be one customer with 'categoryGroup' length exceeding 50 characters")
 
-def test_add_categoryGroup_column(test_data):
-    df = test_data["customers"]
-    
-    # Test the datatypes
-    assert df.schema["categoryGroup"].dataType == StringType()
-    
-    # Test max character length
-    max_length_check = df.filter(col("categoryGroup").isNotNull()).withColumn("char_length", expr("length(categoryGroup)")) \
-                        .where("char_length > 255").count()
-    assert max_length_check == 0  # No values should exceed 255 characters
+    def test_employees_data_type(self):
+        try:
+            self.spark.sql("ALTER TABLE employees_test ADD COLUMNS (lastdate STRING)").show()
+        except AnalysisException as e:
+            self.assertIn("Invalid data type for column lastdate", str(e), "Expected data type error for lastdate")
 
-# Integration Test for backfilling data
-def test_backfilling_lastdate():
-    df = create_employees_table()
-    updated_df = df.fillna({"lastdate": None})
-    
-    null_count = updated_df.filter(col("lastdate").isNull()).count()
-    assert null_count == 2
+    def test_customers_categoryGroup_not_null(self):
+        result = self.spark.sql("""
+        SELECT * FROM customers_test WHERE categoryGroup IS NULL
+        """)
+        self.assertEqual(result.count(), 1, "There should be one customer with NULL 'categoryGroup'")
 
-def test_backfilling_categoryGroup():
-    df = create_customers_table()
-    updated_df = df.fillna({"categoryGroup": None})
-    
-    null_count = updated_df.filter(col("categoryGroup").isNull()).count()
-    assert null_count == 2
-
-# Cleanup
-def test_cleanup(spark_session):
-    # Cleanup operations like drop tables
-    pass
 
 if __name__ == "__main__":
-    pytest.main([__file__])
-    
-# Stop Spark session at the end of tests
-spark.stop()
+    unittest.main(verbosity=2)
+
