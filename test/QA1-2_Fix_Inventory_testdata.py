@@ -1,69 +1,64 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import lit, col
-from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType, DateType, DoubleType
+from pyspark.sql.functions import col, lit
+from pyspark.sql.types import StructType, StructField, StringType, DateType, IntegerType
 
 # Initialize Spark session
-spark = SparkSession.builder.appName("TestDataGeneration").getOrCreate()
+spark = SparkSession.builder.appName("Databricks Test Data Generation").getOrCreate()
 
-# Schema definition for employees table with "lastdate" as DATE
+# Define schema for employees table including the new `lastdate` column
 employees_schema = StructType([
-    StructField("employee_id", LongType(), True),
-    StructField("first_name", StringType(), True),
-    StructField("last_name", StringType(), True),
-    StructField("lastdate", DateType(), True),
-])
-
-# Generate test data for the employees table
-employees_test_data = [
-    # Happy path
-    (1, "John", "Doe", None),
-    (2, "Jane", "Smith", "2023-01-15"),
-
-    # Edge case: leap year date
-    (3, "Jim", "Beam", "2020-02-29"),
-    
-    # Edge case: near future date
-    (4, "Amy", "Winehouse", "2024-03-21"),
-    
-    # Null handling
-    (5, "Null", "User", None),
-
-    # Error case: invalid date format (handled elsewhere, for example via exception handling)
-    # Special characters and multi-byte characters
-    (6, "Sp€c!al", "Chåräctèrs", "2022-12-31")
-]
-
-# Create DataFrame
-employees_df = spark.createDataFrame(employees_test_data, schema=employees_schema)
-employees_df.show()
-
-# Schema definition for customers table with "categoryGroup" as STRING
-customers_schema = StructType([
-    StructField("customer_id", LongType(), True),
+    StructField("employee_id", IntegerType(), True),
     StructField("name", StringType(), True),
-    StructField("categoryGroup", StringType(), True),
+    StructField("lastdate", DateType(), True)  # New 'lastdate' field
 ])
 
-# Generate test data for the customers table
-customers_test_data = [
-    # Happy path
-    (1, "ABC Corp", "Tech"),
-    (2, "XYZ Inc", None),
+# Define schema for customers table including the new `categoryGroup` column
+customers_schema = StructType([
+    StructField("customer_id", IntegerType(), True),
+    StructField("name", StringType(), True),
+    StructField("categoryGroup", StringType(), True)  # New 'categoryGroup' field
+])
 
-    # Edge case: Boundary length for categoryGroup
-    (3, "Max Limit Industries", "X" * 255),
-
-    # Error case: Invalid character length (handled elsewhere, for example via exception handling)
-    # NULL handling
-    (4, "Null Category", None),
-
-    # Special characters and multi-byte characters
-    (5, "国际组织", "International")
+# Generate test data for employees
+employees_data = [
+    # Valid scenarios
+    (1, "John Doe", "2023-01-15"),
+    (2, "Jane Smith", "2022-08-30"),
+    # Boundary conditions
+    (3, "Max Mustermann", None),  # NULL lastdate
+    # Invalid scenarios
+    (4, "Alice Wonderland", "2025-01-01"),  # Future date
+    # Special characters
+    (5, "Älîçé Bøb", "2023-03-22"),
+    (6, "John\nDoe", "2023-04-15")
 ]
 
-# Create DataFrame
-customers_df = spark.createDataFrame(customers_test_data, schema=customers_schema)
-customers_df.show()
+# Generate test data for customers
+customers_data = [
+    # Valid scenarios
+    (1, "Acme Corp", "Premium"),
+    (2, "Globex Inc", "Basic"),
+    (3, "Soylent Corp", "Enterprise"),
+    # Boundary conditions
+    (4, "Initech", "Uncategorized"),  # Default value
+    # Invalid scenarios
+    (5, "Vandelay Industries", None),  # NULL value
+    # Special characters
+    (6, "Blüth Cömjëçt", "BV%çÖ"),  # Special chars in group
+    (7, "Oscorp", "123456789012345678901234567890123456789012345678901")  # Length exceeding 50
+]
 
-# Clean up
-spark.stop()
+# Create DataFrames
+employees_df = spark.createDataFrame(employees_data, schema=employees_schema)
+customers_df = spark.createDataFrame(customers_data, schema=customers_schema)
+
+# Create or replace test tables
+employees_df.write.mode('overwrite').saveAsTable("purgo_playground.employees_test")
+customers_df.write.mode('overwrite').saveAsTable("purgo_playground.customers_test")
+
+# Validate 'lastdate' column in employees (should not be in the future)
+employees_df.filter(col("lastdate") > lit("2023-12-31")).show()
+
+# Validate 'categoryGroup' column in customers (should not be NULL and length <= 50)
+customers_df.filter(col("categoryGroup").isNull() | (col("categoryGroup").getItem(0).rlike("[^a-zA-Z0-9]") | col("categoryGroup").rlike(".{51,}"))).show()
+
