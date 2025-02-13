@@ -1,0 +1,52 @@
+Feature: Update Database Schema for Employee and Customer Tables
+
+  In order to enhance data analytics capabilities
+  As a database administrator
+  I want to add new fields to the employees and customers tables
+
+  Background:
+    Given the Unity Catalog Schema "purgo_playground" is active
+
+  Scenario: Add lastdate to employees table - Happy Path
+    Given the employees table structure is accessible
+    When a "lastdate" column with data type "DATE" is added to the employees table
+    Then the table schema should reflect the new column
+    And the default value for "lastdate" should be set to NULL for existing records
+    And new employee records should allow "lastdate" in the format "YYYY-MM-DD"
+
+  Scenario: Add lastdate to employees table - Error Scenario
+    Given the database integrity constraints are defined
+    When adding a "lastdate" column with an invalid data type
+    Then an error message "Invalid data type for lastdate column" should be returned
+
+  Scenario: Add categoryGroup to customers table - Happy Path
+    Given the customers table structure is accessible
+    When a "categoryGroup" column with data type "VARCHAR(255)" is added to the customers table
+    Then the table schema should reflect the new column
+    And the default value for "categoryGroup" should be set to NULL for existing records
+    And new customer records should allow "categoryGroup" to accept values with a max of 255 characters
+
+  Scenario: Add categoryGroup to customers table - Error Scenario
+    Given the database integrity constraints are defined
+    When adding a "categoryGroup" column with an invalid character length constraint
+    Then an error message "Invalid character length for categoryGroup column" should be returned
+
+  Scenario Outline: Data Validation for New Columns
+    Given a new record in the <table> table
+    When the <column> is entered with an invalid <data>
+    Then an error message "<error_message>" should be displayed
+
+    Examples:
+      | table      | column        | data          | error_message                                 |
+      | employees  | lastdate      | "12-31-2023"  | "lastdate must be in YYYY-MM-DD format"       |
+      | customers  | categoryGroup | "Long_String_That_Exceeds_255_Characters" | "categoryGroup exceeds max character length" |
+
+  Scenario Outline: Backfilling Data for Existing Records
+    Given the "purgo_playground" schema requires data integrity
+    When historical data is backfilled for <table> with <field> values as <default_value>
+    Then all existing records in <table> should be updated appropriately
+
+    Examples:
+      | table      | field        | default_value |
+      | employees  | lastdate     | NULL          |
+      | customers  | categoryGroup| NULL          |
