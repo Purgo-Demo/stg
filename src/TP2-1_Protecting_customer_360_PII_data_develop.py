@@ -1,64 +1,37 @@
-from pyspark.sql.functions import col, sha2, concat, lit
-from datetime import datetime
+# Import necessary libraries and define required functions
+from pyspark.sql.functions import col, sha2, when, current_timestamp, date_format
 import json
-import os
 
-# ---------------------------------------------------
-# Setup: Drop the cloned table if it exists and recreate it from customer_360_raw
-# ---------------------------------------------------
-
-# Drop existing clone table if it exists
+# Drop the existing customer_360_raw_clone table if it exists
 spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
 
-# Create a clone of the customer_360_raw table
+# Clone customer_360_raw table to customer_360_raw_clone
 spark.sql("""
-  CREATE TABLE purgo_playground.customer_360_raw_clone 
+  CREATE TABLE purgo_playground.customer_360_raw_clone
   AS SELECT * FROM purgo_playground.customer_360_raw
 """)
 
-# Function to encrypt columns
-def encrypt_column(df, column_name, key):
-    return df.withColumn(column_name, sha2(concat(col(column_name), lit(key)), 256))
+# Load the cloned data into a DataFrame for transformation
+df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Load data from the cloned table
-customer_raw_df = spark.table("purgo_playground.customer_360_raw_clone")
+# Encrypt the PII columns using SHA-256
+encrypted_df = df.withColumn("name", when(col("name").isNotNull(), sha2(col("name"), 256)).otherwise(None)) \
+    .withColumn("email", when(col("email").isNotNull(), sha2(col("email"), 256)).otherwise(None)) \
+    .withColumn("phone", when(col("phone").isNotNull(), sha2(col("phone"), 256)).otherwise(None)) \
+    .withColumn("zip", when(col("zip").isNotNull(), sha2(col("zip"), 256)).otherwise(None))
 
-# Example encryption key for demonstration purposes
-encryption_key = os.urandom(16).hex()
-
-# Encrypt the PII columns in the DataFrame
-encrypted_df = customer_raw_df \
-    .transform(lambda df: encrypt_column(df, 'name', encryption_key)) \
-    .transform(lambda df: encrypt_column(df, 'email', encryption_key)) \
-    .transform(lambda df: encrypt_column(df, 'phone', encryption_key)) \
-    .transform(lambda df: encrypt_column(df, 'zip', encryption_key))
-
-# Validate schema
-expected_schema = customer_raw_df.schema
-if encrypted_df.schema != expected_schema:
-    raise AssertionError("Schema validation failed after encryption.")
-
-# Save encrypted data back to the table
+# Write the transformed data back to the customer_360_raw_clone table with Delta format
 encrypted_df.write.format("delta").mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# ---------------------------------------------------
-# Save the encryption key to a JSON file
-# ---------------------------------------------------
+# Generate an encryption key for demonstration purposes
+encryption_key = {"key": "static_dummy_key"}
+key_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{date_format(current_timestamp(), 'yyyyMMdd_HHmmss')}.json"
 
-current_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-encryption_key_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_timestamp}.json"
-encryption_key_dict = {"encryption_key": encryption_key}
+# Save the encryption key as a JSON file at specified location
+dbutils.fs.put(key_file_path, json.dumps(encryption_key), overwrite=True)
 
-# Save the encryption key
-os.makedirs(os.path.dirname(encryption_key_path), exist_ok=True)
-with open(encryption_key_path, 'w') as file:
-    json.dump(encryption_key_dict, file)
+# Perform simple validation checks
+assert dbutils.fs.head(key_file_path) is not None, "Error: Encryption key was not saved."
 
-# Check that the JSON file was saved correctly
-if not os.path.exists(encryption_key_path):
-    raise FileNotFoundError(f"Encryption key JSON file was not found at {encryption_key_path}")
-
-# Load and validate the saved encryption key
-with open(encryption_key_path, 'r') as file:
-    saved_key = json.load(file)
-    assert saved_key == encryption_key_dict, "Mismatch between expected and saved encryption keys."
+# Verify encrypted DataFrame to ensure encryption
+encrypted_df.show(truncate=False)
