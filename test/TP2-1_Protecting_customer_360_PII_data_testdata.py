@@ -1,14 +1,15 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, encode, decode
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DateType
-import json
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType, DecimalType, ArrayType, MapType, BooleanType
+import random
 from datetime import datetime
 
 # Initialize Spark session
-spark = SparkSession.builder.appName("PII Encryption").getOrCreate()
+spark = SparkSession.builder \
+    .appName("Databricks Test Data Generation") \
+    .getOrCreate()
 
-# Define schema for the test data
-schema = StructType([
+# Define schemas for various tables
+customer_360_raw_schema = StructType([
     StructField("id", LongType(), True),
     StructField("name", StringType(), True),
     StructField("email", StringType(), True),
@@ -21,56 +22,67 @@ schema = StructType([
     StructField("country", StringType(), True),
     StructField("industry", StringType(), True),
     StructField("account_manager", StringType(), True),
-    StructField("creation_date", DateType(), True),
-    StructField("last_interaction_date", DateType(), True),
+    StructField("creation_date", TimestampType(), True),
+    StructField("last_interaction_date", TimestampType(), True),
     StructField("purchase_history", StringType(), True),
     StructField("notes", StringType(), True),
     StructField("zip", StringType(), True)
 ])
 
-# Generate test data
-data = [
-    (1, "Alice Smith", "alice@example.com", "1234567890", "Company A", "Engineer", "123 St", "City A", "State A", "Country A", "Tech", "Manager A", None, None, "Purchase A", "Notes A", "12345"),
-    (2, "Bob Johnson", "bob@example.com", "0987654321", "Company B", "Manager", "456 St", "City B", "State B", "Country B", "Finance", "Manager B", None, None, "Purchase B", "Notes B", "54321"),
-    # Edge Cases
-    (3, "", "invalidemail", "notaphone", "", "", "", "", "", "", "", "", None, None, "", "", ""),
-    (4, "Bob 'The Builder™'", "unicode@example.com", "555-1234", "Company C", "Builder", "789 St", "City C", "State C", "Country C", "Construction", "Manager C", None, None, "Purchase C", "Special Characters: !@#$%^&*()", None),
-    # Special character and NULL handling
-    (5, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None)
+# Generate test data records
+customer_360_raw_data = [
+    {
+        "id": i,
+        "name": f"Customer {i}",
+        "email": f"customer{i}@example.com",
+        "phone": f"+1234567890{i%10}",
+        "company": f"Company {i}",
+        "job_title": "Engineer",
+        "address": "123 Main St",
+        "city": "Metropolis",
+        "state": "CA",
+        "country": "USA",
+        "industry": "Technology",
+        "account_manager": f"Manager {i}",
+        "creation_date": "2025-03-21T00:00:00.000+0000",
+        "last_interaction_date": "2025-03-22T00:00:00.000+0000",
+        "purchase_history": "Item A, Item B",
+        "notes": "Important customer",
+        "zip": "12345"
+    } for i in range(20)
 ]
 
 # Create DataFrame
-df = spark.createDataFrame(data, schema)
+customer_360_raw_df = spark.createDataFrame(data=customer_360_raw_data, schema=customer_360_raw_schema)
+
+# Display the DataFrame
+customer_360_raw_df.show()
 
 # Encrypt PII columns
-encryption_key = "secret_key"  # This could be any key or generated securely
-encrypted_df = df.select(
-    col("id"),
-    encode(col("name"), encryption_key).alias("name"),
-    encode(col("email"), encryption_key).alias("email"),
-    encode(col("phone"), encryption_key).alias("phone"),
-    col("company"),
-    col("job_title"),
-    col("address"),
-    col("city"),
-    col("state"),
-    col("country"),
-    col("industry"),
-    col("account_manager"),
-    col("creation_date"),
-    col("last_interaction_date"),
-    col("purchase_history"),
-    col("notes"),
-    encode(col("zip"), encryption_key).alias("zip")
-)
+def encrypt_col(df, col_name):
+    return df.withColumn(col_name, F.sha2(F.col(col_name), 256))
 
-# Write the test data to the destination table
-encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+pii_columns = ['name', 'email', 'phone', 'zip']
+for col in pii_columns:
+    customer_360_raw_df = encrypt_col(customer_360_raw_df, col)
 
-# Save the encryption key to JSON file
-encryption_key_metadata = {
-    "encryption_key": encryption_key,
-    "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f+0000")
-}
-with open(f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", 'w') as json_file:
-    json.dump(encryption_key_metadata, json_file)
+# Save the encryption key (Dummy Key for simplicity, should use a secure method in production)
+encryption_key = {"key": "dummy_encryption_key"}
+encryption_key_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+
+with open(encryption_key_path, 'w') as key_file:
+    key_file.write(f"{encryption_key}")
+
+print(f"Encryption Key saved to: {encryption_key_path}")
+
+# Load data to the clone table
+customer_360_raw_clone_table = "purgo_playground.customer_360_raw_clone"
+
+# Drop if exists and then overwrite with new data
+spark.sql(f"DROP TABLE IF EXISTS {customer_360_raw_clone_table}")
+customer_360_raw_df.write.mode("overwrite").saveAsTable(customer_360_raw_clone_table)
+
+# Confirm data has been loaded
+loaded_df = spark.table(customer_360_raw_clone_table)
+loaded_df.show()
+
