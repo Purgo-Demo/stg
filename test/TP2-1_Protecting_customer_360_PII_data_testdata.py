@@ -1,15 +1,17 @@
-from pyspark.sql import SparkSession, functions as F
-from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType, DecimalType, ArrayType, MapType, BooleanType
+from pyspark.sql.functions import col, lit, when, current_timestamp
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, DateType
 import random
-from datetime import datetime
+import json
+import datetime
 
-# Initialize Spark session
+# Initialize Spark Session
 spark = SparkSession.builder \
     .appName("Databricks Test Data Generation") \
     .getOrCreate()
 
-# Define schemas for various tables
-customer_360_raw_schema = StructType([
+# Schema definition for customer_360_raw_clone
+schema = StructType([
     StructField("id", LongType(), True),
     StructField("name", StringType(), True),
     StructField("email", StringType(), True),
@@ -22,67 +24,58 @@ customer_360_raw_schema = StructType([
     StructField("country", StringType(), True),
     StructField("industry", StringType(), True),
     StructField("account_manager", StringType(), True),
-    StructField("creation_date", TimestampType(), True),
-    StructField("last_interaction_date", TimestampType(), True),
+    StructField("creation_date", DateType(), True),
+    StructField("last_interaction_date", DateType(), True),
     StructField("purchase_history", StringType(), True),
     StructField("notes", StringType(), True),
-    StructField("zip", StringType(), True)
+    StructField("zip", StringType(), True),
+    StructField("is_churn", LongType(), True),
 ])
 
-# Generate test data records
-customer_360_raw_data = [
-    {
-        "id": i,
-        "name": f"Customer {i}",
-        "email": f"customer{i}@example.com",
-        "phone": f"+1234567890{i%10}",
-        "company": f"Company {i}",
-        "job_title": "Engineer",
-        "address": "123 Main St",
-        "city": "Metropolis",
-        "state": "CA",
-        "country": "USA",
-        "industry": "Technology",
-        "account_manager": f"Manager {i}",
-        "creation_date": "2025-03-21T00:00:00.000+0000",
-        "last_interaction_date": "2025-03-22T00:00:00.000+0000",
-        "purchase_history": "Item A, Item B",
-        "notes": "Important customer",
-        "zip": "12345"
-    } for i in range(20)
+# Sample test data generation
+data = [
+    (1, "John Doe", "john.doe@example.com", "+1234567890", "Example Inc", "Manager", "123 Elm St", "Ann Arbor", "MI", "USA", "Tech", "Rachel Smith", "2024-01-01", "2024-04-01", "Purchase 1, Purchase 2", "First note", "12345", 0), # Happy path
+    (2, "Jane Doe", "jane.doe@example.com", "+0987654321", "", "Developer", "456 Oak St", "Chicago", "IL", "USA", "Fintech", "Robert Brown", "2023-12-31", "2024-01-15", "Purchase A, Purchase B", "Second note", "54321", 1), # Edge case, empty company name
+    (3, "Invalid Date", "invalid.date@example.com", "+1122334455", "Invalid Corp", "Tester", "789 Pine St", "Seattle", "WA", "USA", "Retail", "Tina White", "2024-02-31", "2024-04-32", "Purchase X", "Invalid date note", "99999", -1), # Error case, invalid dates
+    (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None), # NULL handling
+    (4, "Special Char 😊", "special.char@example.com", "+0000000000", "Unicode Co", "Designer", "Special St", "Tokyo", "TY", "Japan", "Design", "Kim Lee", "2024-03-21", "2024-04-20", "Purchase Y", "Special char note", "56789", 1) # Special character
 ]
 
 # Create DataFrame
-customer_360_raw_df = spark.createDataFrame(data=customer_360_raw_data, schema=customer_360_raw_schema)
+df_test_data = spark.createDataFrame(data, schema)
 
-# Display the DataFrame
-customer_360_raw_df.show()
+# Display DataFrame
+df_test_data.show(truncate=False)
+
+# Encryption simulation - simple mapping function (actual encryption logic to replace with a secure method)
+def encrypt(value, key):
+    if value is None:
+        return None
+    # Simple encryption simulation by reversing string and appending a keyword
+    encrypted_value = value[::-1] + key
+    return encrypted_value
+
+# Generate encryption key (for illustration purposes)
+encryption_key = f"key_{random.randint(1000, 9999)}"
 
 # Encrypt PII columns
-def encrypt_col(df, col_name):
-    return df.withColumn(col_name, F.sha2(F.col(col_name), 256))
+encrypted_df = df_test_data.withColumn("name", when(col("name").isNotNull(), lit(encrypt(col("name").cast("string"), encryption_key))).otherwise(None)) \
+    .withColumn("email", when(col("email").isNotNull(), lit(encrypt(col("email").cast("string"), encryption_key))).otherwise(None)) \
+    .withColumn("phone", when(col("phone").isNotNull(), lit(encrypt(col("phone").cast("string"), encryption_key))).otherwise(None)) \
+    .withColumn("zip", when(col("zip").isNotNull(), lit(encrypt(col("zip").cast("string"), encryption_key))).otherwise(None))
 
-pii_columns = ['name', 'email', 'phone', 'zip']
-for col in pii_columns:
-    customer_360_raw_df = encrypt_col(customer_360_raw_df, col)
+# Display encrypted DataFrame
+encrypted_df.show(truncate=False)
 
-# Save the encryption key (Dummy Key for simplicity, should use a secure method in production)
-encryption_key = {"key": "dummy_encryption_key"}
-encryption_key_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+# Save encryption key as JSON
+encryption_key_location = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+key_data = {"encryption_key": encryption_key}
+with open(encryption_key_location, "w") as json_file:
+    json.dump(key_data, json_file)
 
-with open(encryption_key_path, 'w') as key_file:
-    key_file.write(f"{encryption_key}")
+# Checkpoint: data integrity verification
+# For this minimal example, assume encrypted_df should retain all non-PII data unchanged
 
-print(f"Encryption Key saved to: {encryption_key_path}")
-
-# Load data to the clone table
-customer_360_raw_clone_table = "purgo_playground.customer_360_raw_clone"
-
-# Drop if exists and then overwrite with new data
-spark.sql(f"DROP TABLE IF EXISTS {customer_360_raw_clone_table}")
-customer_360_raw_df.write.mode("overwrite").saveAsTable(customer_360_raw_clone_table)
-
-# Confirm data has been loaded
-loaded_df = spark.table(customer_360_raw_clone_table)
-loaded_df.show()
+# Stop Spark session
+spark.stop()
 
