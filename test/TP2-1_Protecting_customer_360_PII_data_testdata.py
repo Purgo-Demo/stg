@@ -1,81 +1,67 @@
-from pyspark.sql.functions import col, lit, when, current_timestamp
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, DateType
-import random
+from pyspark.sql.functions import col, lit, udf, current_timestamp, struct, to_timestamp
+from pyspark.sql.types import StringType, TimestampType
+from cryptography.fernet import Fernet
 import json
-import datetime
+import os
 
-# Initialize Spark Session
-spark = SparkSession.builder \
-    .appName("Databricks Test Data Generation") \
-    .getOrCreate()
+# Initialize Spark session
+spark = SparkSession.builder.appName('EncryptPIIData').getOrCreate()
 
-# Schema definition for customer_360_raw_clone
-schema = StructType([
-    StructField("id", LongType(), True),
-    StructField("name", StringType(), True),
-    StructField("email", StringType(), True),
-    StructField("phone", StringType(), True),
-    StructField("company", StringType(), True),
-    StructField("job_title", StringType(), True),
-    StructField("address", StringType(), True),
-    StructField("city", StringType(), True),
-    StructField("state", StringType(), True),
-    StructField("country", StringType(), True),
-    StructField("industry", StringType(), True),
-    StructField("account_manager", StringType(), True),
-    StructField("creation_date", DateType(), True),
-    StructField("last_interaction_date", DateType(), True),
-    StructField("purchase_history", StringType(), True),
-    StructField("notes", StringType(), True),
-    StructField("zip", StringType(), True),
-    StructField("is_churn", LongType(), True),
-])
+# Generate encryption key
+encryption_key = Fernet.generate_key()
+cipher = Fernet(encryption_key)
 
-# Sample test data generation
-data = [
-    (1, "John Doe", "john.doe@example.com", "+1234567890", "Example Inc", "Manager", "123 Elm St", "Ann Arbor", "MI", "USA", "Tech", "Rachel Smith", "2024-01-01", "2024-04-01", "Purchase 1, Purchase 2", "First note", "12345", 0), # Happy path
-    (2, "Jane Doe", "jane.doe@example.com", "+0987654321", "", "Developer", "456 Oak St", "Chicago", "IL", "USA", "Fintech", "Robert Brown", "2023-12-31", "2024-01-15", "Purchase A, Purchase B", "Second note", "54321", 1), # Edge case, empty company name
-    (3, "Invalid Date", "invalid.date@example.com", "+1122334455", "Invalid Corp", "Tester", "789 Pine St", "Seattle", "WA", "USA", "Retail", "Tina White", "2024-02-31", "2024-04-32", "Purchase X", "Invalid date note", "99999", -1), # Error case, invalid dates
-    (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None), # NULL handling
-    (4, "Special Char 😊", "special.char@example.com", "+0000000000", "Unicode Co", "Designer", "Special St", "Tokyo", "TY", "Japan", "Design", "Kim Lee", "2024-03-21", "2024-04-20", "Purchase Y", "Special char note", "56789", 1) # Special character
-]
-
-# Create DataFrame
-df_test_data = spark.createDataFrame(data, schema)
-
-# Display DataFrame
-df_test_data.show(truncate=False)
-
-# Encryption simulation - simple mapping function (actual encryption logic to replace with a secure method)
-def encrypt(value, key):
-    if value is None:
+# Encryption UDF
+@udf(returnType=StringType())
+def encrypt(value):
+    if value is not None:
+        return cipher.encrypt(value.encode()).decode()
+    else:
         return None
-    # Simple encryption simulation by reversing string and appending a keyword
-    encrypted_value = value[::-1] + key
-    return encrypted_value
 
-# Generate encryption key (for illustration purposes)
-encryption_key = f"key_{random.randint(1000, 9999)}"
+# Load customer_360_raw table
+customer_360_df = spark.read.table("purgo_playground.customer_360_raw")
 
-# Encrypt PII columns
-encrypted_df = df_test_data.withColumn("name", when(col("name").isNotNull(), lit(encrypt(col("name").cast("string"), encryption_key))).otherwise(None)) \
-    .withColumn("email", when(col("email").isNotNull(), lit(encrypt(col("email").cast("string"), encryption_key))).otherwise(None)) \
-    .withColumn("phone", when(col("phone").isNotNull(), lit(encrypt(col("phone").cast("string"), encryption_key))).otherwise(None)) \
-    .withColumn("zip", when(col("zip").isNotNull(), lit(encrypt(col("zip").cast("string"), encryption_key))).otherwise(None))
+# Handle PII encryption for cloned table
+customer_360_clone_df = customer_360_df.withColumn("name", encrypt(col("name"))) \
+    .withColumn("email", encrypt(col("email"))) \
+    .withColumn("phone", encrypt(col("phone"))) \
+    .withColumn("zip", encrypt(col("zip")))
 
-# Display encrypted DataFrame
-encrypted_df.show(truncate=False)
+# Save to customer_360_raw_clone
+customer_360_clone_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Save encryption key as JSON
-encryption_key_location = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-key_data = {"encryption_key": encryption_key}
-with open(encryption_key_location, "w") as json_file:
-    json.dump(key_data, json_file)
+# Generate JSON filename with current timestamp
+current_datetime = current_timestamp().sql('<string>').replace(':', '').replace(' ', '').replace('-', '')
+json_file_name = f"encryption_key_{current_datetime}.json"
+json_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/{json_file_name}"
 
-# Checkpoint: data integrity verification
-# For this minimal example, assume encrypted_df should retain all non-PII data unchanged
+# Save encryption key to JSON file
+encryption_key_data = {"encryption_key": encryption_key.decode()}
+with open(json_file_path, 'w') as json_file:
+    json.dump(encryption_key_data, json_file)
 
-# Stop Spark session
-spark.stop()
+# Sample Test Data for various scenarios
+
+# Happy path test data
+test_df = spark.createDataFrame([
+    (1, "John Doe", "johndoe@example.com", "+123456789", "Acme Corp", "Engineer", "123 Elm St", "Springfield", "IL", "USA", "Technology", "Alice Johnson", "2023-05-20", "2023-10-04", "Purchase1", "Notes1", "12345"),
+    # Edge case: max length of string
+    (2, "A"*255, "verylongemailaddress@example.com", "+9999999999", "Very Long Company Name", "Chief Very Long Title Officer", "999 Long Street Name"*5, "Long City Name"*5, "LONGSTATE", "United States of America", "Very Long Industry Name", "Longest Manager Name"*3, "2023-01-01", "2023-12-31", "Long purchase history"*10, "Long notes description"*10, "99999"),
+    # Error case: invalid email format
+    (3, "Jane Doe", "janedoeatexampledotcom", "+987654321", "Tech Inc", "Manager", "456 Oak Rd", "Metropolis", "CA", "USA", "Finance", "Bob Smith", "2023-09-17", "2023-10-04", "Purchase2", "Notes2", "54321"),
+    # Null handling
+    (4, None, None, None, "Null Co", "None When Available", None, "NoCity", "NA", "None Country", "Null Values Industry", None, None, None, "", "", None)
+], customer_360_df.schema)
+
+# Special characters and multi-byte characters
+special_char_df = spark.createDataFrame([
+    (5, "Søren Kierkegård", "søren@example.com", "+112358132134", "Philosophy Org", "Philosopher", "Philosophy Blvd 42", "Copenhagen", "The Capital", "Denmark", "Philosophy", "Professor Søren", "2023-06-15", "2023-10-04", "Book Purchases", "Complex notes with special characters #!@#$%", "40000"),
+    (6, "山田太郎", "yamada@example.com", "+819012345678", "Japan Inc.", "技術者", "東京1番地", "東京", "東京", "日本", "IT業界", "長谷川一郎", "2021-07-08", "2023-10-04", "日本国内購入", "日本語メモと特殊文字", "1234567")
+], customer_360_df.schema)
+
+# Append to customer_360_raw_clone with diverse test records
+customer_360_test_data_df = customer_360_clone_df.unionAll(test_df).unionAll(special_char_df)
+customer_360_test_data_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
 
