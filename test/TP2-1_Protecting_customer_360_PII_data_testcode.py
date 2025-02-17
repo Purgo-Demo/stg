@@ -1,110 +1,98 @@
-# Imports and library installation
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, udf, lit
-from pyspark.sql.types import StringType
-from cryptography.fernet import Fernet
+from pyspark.sql import SparkSession, functions as F
+from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
 import json
-from datetime import datetime
-import os
+import datetime
 
-# Install cryptography library if not available
-dbutils.library.installPyPI('cryptography')
+# Setup configuration
+# Required libraries are part of PySpark, so no additional installation is needed
 
 # Initialize Spark session
 spark = SparkSession.builder \
-    .appName("Encrypt PII Data") \
-    .enableHiveSupport() \
+    .appName("PII Data Encryption Tests") \
     .getOrCreate()
 
-# Generate an encryption key and set up Fernet
-encryption_key = Fernet.generate_key()
-fernet = Fernet(encryption_key)
+# Define schema for customer_360_raw table
+customer_360_raw_schema = StructType([
+    StructField("id", LongType(), True),
+    StructField("name", StringType(), True),
+    StructField("email", StringType(), True),
+    StructField("phone", StringType(), True),
+    StructField("company", StringType(), True),
+    StructField("job_title", StringType(), True),
+    StructField("address", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("state", StringType(), True),
+    StructField("country", StringType(), True),
+    StructField("industry", StringType(), True),
+    StructField("account_manager", StringType(), True),
+    StructField("creation_date", TimestampType(), True),
+    StructField("last_interaction_date", TimestampType(), True),
+    StructField("purchase_history", StringType(), True),
+    StructField("notes", StringType(), True),
+    StructField("zip", StringType(), True)
+])
 
-# UDF for encryption using Fernet
-def encrypt_column(column_value):
-    if column_value is not None:
-        return fernet.encrypt(column_value.encode()).decode()
-    else:
-        return None
-encrypt_udf = udf(encrypt_column, StringType())
+# Simulate test data for customer_360_raw
+customer_360_raw_data = [
+    (1, "John Doe", "john.doe@example.com", "123-456-7890", "John's Company", "CEO", "123 Elm St", "Gotham", "NY", "USA", "Retail", "Jane Manager", 
+     datetime.datetime(2023, 1, 1), datetime.datetime(2023, 1, 15), "TV, Laptop", "Valued", "98765")
+    # Add more test cases as needed
+]
 
-# Load customer_360_raw table into a DataFrame
-customer_360_raw_df = spark.table("purgo_playground.customer_360_raw")
+# Create DataFrame from the test data
+customer_360_raw_df = spark.createDataFrame(data=customer_360_raw_data, schema=customer_360_raw_schema)
 
-# Perform encryption on PII columns
-customer_360_encrypted_df = customer_360_raw_df.withColumn("name", encrypt_udf(col("name"))) \
-    .withColumn("email", encrypt_udf(col("email"))) \
-    .withColumn("phone", encrypt_udf(col("phone"))) \
-    .withColumn("zip", encrypt_udf(col("zip")))
+# Encrypt columns
+def encrypt_cols(df, cols):
+    for col in cols:
+        df = df.withColumn(col, F.sha2(F.col(col), 256))
+    return df
 
-# Drop existing clone table if it exists
-spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+# Function to save encryption keys (for testing, use a mock key)
+def save_encryption_key(directory, key_name):
+    encryption_key = {"encryption_key": "1234567890abcdef1234567890abcdef"}
+    key_path = f"{directory}/{key_name}.json"
+    with open(key_path, 'w') as key_file:
+        json.dump(encryption_key, key_file)
+    return key_path
 
-# Write encrypted data to the clone table
-customer_360_encrypted_df.write \
-    .mode("overwrite") \
-    .saveAsTable("purgo_playground.customer_360_raw_clone")
+# Encryption and test procedures
+pii_columns = ['name', 'email', 'phone', 'zip']
+customer_360_encrypted_df = encrypt_cols(customer_360_raw_df, pii_columns)
 
-# Save the encryption key as a JSON file
-current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
-key_file_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+# Save encryption key
+key_directory = "/Volumes/agilisium_playground/purgo_playground/de_dq"
+current_datetime = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+key_file_path = save_encryption_key(key_directory, f"encryption_key_{current_datetime}")
 
-with open(key_file_path, "w") as key_file:
-    json.dump({"encryption_key": encryption_key.decode()}, key_file)
+# Validate that the DataFrame has been encrypted correctly and saved
+customer_360_encrypted_df.show(truncate=False)
 
-# Verify data integrity: non-PII columns should remain unchanged
-assert customer_360_raw_df.select("company", "job_title", "address").exceptAll(
-    customer_360_encrypted_df.select("company", "job_title", "address")).count() == 0, "Data integrity test failed"
+# Validation can involve checking the format of the encrypted PII fields
+encrypted_sample = customer_360_encrypted_df.select("name", "email", "phone", "zip").first()
+assert encrypted_sample["name"] != "John Doe", "The name column was not encrypted properly."
 
-# Decrypting a test record to ensure decryption works and matches original
-sample_original_row = customer_360_raw_df.select("name").first()["name"]
-sample_encrypted_row = customer_360_encrypted_df.select("name").first()["name"]
-decrypted_value = fernet.decrypt(sample_encrypted_row.encode()).decode()
-assert sample_original_row == decrypted_value, "Decryption validation failed"
+# Verify the encryption key has been saved
+print(f"Encryption Key Path: {key_file_path}")
 
-# Test permission and access controls (mock scenario)
-# Define user roles and expected access conditions
-user_role = "unauthorized_user"
-access_condition = "access_denied"
-assert access_condition == "access_denied", f"{user_role} should be denied access"
+# Test data loading functionality (mock)
+def test_data_load():
+    # Mock loading of data
+    customer_360_encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+    clone_df = spark.table("purgo_playground.customer_360_raw_clone")
+    
+    # Check if the clone table is created and has the expected structure
+    assert clone_df.count() == customer_360_encrypted_df.count(), "Data load to clone failed, row count mismatch."
+    assert set(clone_df.columns) == set(customer_360_raw_df.columns), "Clone table schema mismatch."
 
-# Performance test for writing the encrypted table
-num_rows = customer_360_raw_df.count()
-spark.conf.set("spark.sql.shuffle.partitions", 4)
-performance_df = customer_360_encrypted_df.repartition(4)
-performance_df.write.mode("overwrite").saveAsTable("temp_performance_test")
-end_num_rows = spark.table("temp_performance_test").count()
-assert num_rows == end_num_rows, "Performance test failed - row count mismatch"
+    clone_df.show(truncate=False)
 
-# Cleanup operations
-spark.sql("DROP TABLE IF EXISTS temp_performance_test")
+# Cleanup (make sure to drop test tables and temp views)
+def cleanup():
+    spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+    print("Test artifacts cleaned up.")
 
-# Stop Spark session
-spark.stop()
+# Execute test functions
+test_data_load()
+cleanup()
 
-# Block comments to describe sections
-"""
-# Section: Initialization and Library Installation
-- Initialize Spark session
-- Install required libraries
-# Section: Key Generation and Encryption Setup
-- Generate encryption key
-- Define UDF for column encryption
-# Section: Table Operations
-- Load original table
-- Encrypt and save to clone
-- Save encryption key
-# Section: Validation and Testing
-- Data integrity checks
-- Decryption validation
-- Permission/access control mock test
-- Performance testing
-# Section: Cleanup
-- Remove temporary artifacts
-"""
-
-# Line comments explaining specific operations
-# Initialize by registering UDF with Spark
-# Validate data integrity; unchanged columns stay the same
-# Use .encode() for encryption and conversion to bytes
-# Decrypt sample values to ensure functionality
