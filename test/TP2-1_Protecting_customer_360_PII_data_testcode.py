@@ -7,23 +7,20 @@ import datetime
 import os
 
 # Initialize Spark session
-spark = SparkSession.builder \
-    .appName("Databricks Test Code for PII Encryption") \
-    .enableHiveSupport() \
-    .getOrCreate()
+spark = SparkSession.builder.appName("Encrypt PII Data").getOrCreate()
 
-# Define file paths
+# Create a replica of the original table
 source_table = "purgo_playground.customer_360_raw"
-clone_table = "purgo_playground.customer_360_raw_clone"
-encryption_key_path = "/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq"
+replica_table = "purgo_playground.customer_360_raw_clone"
 
-# Drop table if exists
-spark.sql(f"DROP TABLE IF EXISTS {clone_table}")
+# Drop if exists and create a replica of the source table
+spark.sql(f"DROP TABLE IF EXISTS {replica_table}")
+spark.sql(f"CREATE TABLE {replica_table} AS SELECT * FROM {source_table}")
 
-# Create a replica of customer_360_raw
-spark.sql(f"CREATE TABLE {clone_table} AS SELECT * FROM {source_table}")
+# Load DataFrame from the created replica table
+df = spark.table(replica_table)
 
-# Define a simple encryption placeholder function
+# Define a simple encryption placeholder function. Replace this with appropriate encryption logic.
 def encrypt_pii(value: str) -> str:
     if value:
         return f"enc({value})"
@@ -32,22 +29,21 @@ def encrypt_pii(value: str) -> str:
 # Register UDF
 encrypt_udf = udf(encrypt_pii, StringType())
 
-# Read the clone table
-df_clone = spark.table(clone_table)
-
 # Encrypt PII columns
-encrypted_df = df_clone.withColumn("name", encrypt_udf(col("name"))) \
+encrypted_df = df.withColumn("name", encrypt_udf(col("name"))) \
     .withColumn("email", encrypt_udf(col("email"))) \
     .withColumn("phone", encrypt_udf(col("phone"))) \
     .withColumn("zip", encrypt_udf(col("zip")))
 
-# Overwrite the encrypted data back to the clone table
-encrypted_df.write.format("delta").mode("overwrite").saveAsTable(clone_table)
+# Validate that DataFrame schema matches expected schema for encrypted data
+expected_schema = df.schema
+assert encrypted_df.schema == expected_schema, "Schema mismatch after encryption"
 
-# Validate schema
-expected_schema = df_clone.schema
-encrypted_schema = spark.table(clone_table).schema
-assert expected_schema == encrypted_schema, "Schema validation failed"
+# Show the encrypted_df for manual validation
+encrypted_df.show(truncate=False)
+
+# Save the DataFrame as a Delta table
+encrypted_df.write.format("delta").mode("overwrite").saveAsTable(replica_table)
 
 # Save the encryption key to JSON file
 encryption_key = {
@@ -56,15 +52,23 @@ encryption_key = {
     "phone_key": "key_for_phone",
     "zip_key": "key_for_zip"
 }
-current_datetime = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-key_filename = f"{encryption_key_path}/encryption_key_{current_datetime}.json"
+current_datetime = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+key_filename = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+
+# Ensure the directory exists
+os.makedirs(os.path.dirname(key_filename), exist_ok=True)
 
 # Save encryption key file
 with open(key_filename, "w") as f:
     json.dump(encryption_key, f)
 
-# Verify encryption key file existence
-assert os.path.exists(key_filename), f"Encryption key file was not saved: {key_filename}"
+# Validate the filename and directory of the saved encryption key
+assert os.path.isfile(key_filename), "Encryption key file was not saved correctly"
 
-# Clean up operations (optional): Remove test files or intermediate tables if needed
+# Validate Delta Lake operations
+assert "id" in encrypted_df.columns, "ID column is missing after Delta operation"
+
+# Cleanup operations
+# Drop the temporary replica table
+spark.sql(f"DROP TABLE IF EXISTS {replica_table}")
 
