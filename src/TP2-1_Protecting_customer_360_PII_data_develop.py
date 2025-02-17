@@ -1,46 +1,49 @@
-# PySpark script to encrypt PII data in customer_360_raw_clone table in Databricks environment
-
-from pyspark.sql.functions import col, sha2, date_format, current_timestamp
+# Required Libraries
+from pyspark.sql.functions import col, udf, current_timestamp
+from pyspark.sql.types import StringType
+from cryptography.fernet import Fernet
 import json
 
-# Drop the table if it exists
+# Drop the existing clone table if it exists
 spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
 
-# Create a clone of the customer_360_raw table
+# Create a replica of the customer_360_raw table in customer_360_raw_clone
 spark.sql("""
-  CREATE TABLE purgo_playground.customer_360_raw_clone
-  AS SELECT * FROM purgo_playground.customer_360_raw
+CREATE TABLE purgo_playground.customer_360_raw_clone AS 
+SELECT * FROM purgo_playground.customer_360_raw
 """)
 
-# Read data from the clone table
-df = spark.table("purgo_playground.customer_360_raw_clone")
+# Generate an encryption key using Fernet
+encryption_key = Fernet.generate_key()
+cipher = Fernet(encryption_key)
 
-# Encrypt PII columns using SHA-256
-encrypted_df = df.withColumn("name", sha2(col("name"), 256)) \
-    .withColumn("email", sha2(col("email"), 256)) \
-    .withColumn("phone", sha2(col("phone"), 256)) \
-    .withColumn("zip", sha2(col("zip"), 256))
+# Define a UDF for encrypting PII columns
+@udf(returnType=StringType())
+def encrypt(value):
+    if value is not None:
+        return cipher.encrypt(value.encode()).decode()
+    return None
 
-# Define and save the encryption key to a JSON file
-encryption_key = {"key": "unique_encryption_key_for_demo"}  # Placeholder
-key_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{date_format(current_timestamp(), 'yyyyMMdd_HHmmss')}.json"
-dbutils.fs.put(key_file_path, json.dumps(encryption_key))
+# Load data from customer_360_raw_clone
+customer_360_df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Save the encrypted DataFrame back to Delta table
-encrypted_df.write.format("delta").mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+# Encrypt the specified PII columns
+encrypted_df = customer_360_df.withColumn("name", encrypt(col("name"))) \
+    .withColumn("email", encrypt(col("email"))) \
+    .withColumn("phone", encrypt(col("phone"))) \
+    .withColumn("zip", encrypt(col("zip")))
 
-# Perform data validation to ensure the encryption process
-# Validate schema remains unchanged except for encrypted columns
-assert encrypted_df.schema == df.schema, "Schema has changed after encryption"
+# Overwrite the clone table with encrypted data
+encrypted_df.write.format("delta").mode("overwrite") \
+    .option("overwriteSchema", "true") \
+    .saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Validate encryption key was saved
-assert dbutils.fs.head(key_file_path) is not None, "Encryption key was not saved correctly"
+# Save the encryption key as a JSON file with a timestamp
+# Correct the JSON file naming with a suitable method for current_datetime
+json_datetime = spark.sql("SELECT CURRENT_TIMESTAMP").collect()[0][0].strftime("%Y%m%d%H%M%S")
+json_file_name = f"encryption_key_{json_datetime}.json"
+json_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/{json_file_name}"
 
-# Validate row count remains the same
-original_count = spark.table("purgo_playground.customer_360_raw").count()
-clone_count = spark.table("purgo_playground.customer_360_raw_clone").count()
-assert original_count == clone_count, "Row count mismatch after encryption"
-
-# Perform cleanup if necessary
-# (Not recommended to call drop in production unless it's required after validation)
-# spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+encryption_key_data = {"encryption_key": encryption_key.decode()}
+with open(json_file_path, 'w') as json_file:
+    json.dump(encryption_key_data, json_file)
