@@ -1,4 +1,4 @@
-from pyspark.sql.functions import col, sha2, concat, lit
+from pyspark.sql.functions import col, sha2, concat, lit, current_timestamp
 from datetime import datetime
 import json
 import os
@@ -18,17 +18,17 @@ spark.sql("""
 
 # Define encryption function
 def encrypt_column(df, column_name, key):
-    # Simple hash encryption for demonstration purposes
+    # Pseudo encryption using SHA-256; replace with actual encryption logic if needed
     return df.withColumn(column_name, sha2(concat(col(column_name), lit(key)), 256))
 
 # Load data from customer_360_raw_clone
-customer_raw_df = spark.table("purgo_playground.customer_360_raw_clone")
+customer_raw_clone_df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Key for pseudo encryption (to replace with an actual encryption logic)
+# Key for pseudo encryption (to be replaced with an actual encryption key management process)
 encryption_key = "sample_encryption_key"
 
 # Encrypt PII columns
-encrypted_df = customer_raw_df \
+encrypted_df = customer_raw_clone_df \
     .transform(lambda df: encrypt_column(df, 'name', encryption_key)) \
     .transform(lambda df: encrypt_column(df, 'email', encryption_key)) \
     .transform(lambda df: encrypt_column(df, 'phone', encryption_key)) \
@@ -38,12 +38,12 @@ encrypted_df = customer_raw_df \
 # Validate schema of the encrypted DataFrame
 # ---------------------------------------------------
 
-expected_schema = customer_raw_df.schema
+expected_schema = customer_raw_clone_df.schema
 if encrypted_df.schema != expected_schema:
     raise AssertionError("Schema validation failed after encryption.")
 
 # Save encrypted data back to cloned table
-encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+encrypted_df.write.mode("overwrite").format("delta").saveAsTable("purgo_playground.customer_360_raw_clone")
 
 # ---------------------------------------------------
 # JSON Key Storage
@@ -73,5 +73,12 @@ with open(encryption_key_path, 'r') as file:
     assert saved_key == encryption_key_dict, "Mismatch between expected and saved encryption keys."
 
 # ---------------------------------------------------
-# End of Script
+# Table Optimization and Vacuum (Delta Lake Feature)
 # ---------------------------------------------------
+
+# Optimize the table with Z-order by 'id' assuming it is frequently queried
+spark.sql("OPTIMIZE purgo_playground.customer_360_raw_clone ZORDER BY (id)")
+
+# Vacuum the table to clean up old files (keep 7 days' data for safety)
+spark.sql("VACUUM purgo_playground.customer_360_raw_clone RETAIN 7 HOURS")
+
