@@ -1,67 +1,32 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DecimalType, TimestampType
+from pyspark.sql.functions import col, lit, when, sum, concat
 
-# Start Spark session
-spark = SparkSession.builder.appName("GenerateTestData").getOrCreate()
+spark = SparkSession.builder \
+    .appName("Test Data Generation for Databricks") \
+    .getOrCreate()
 
-# Define schema for f_inv_movmnt table using Databricks native data types
-f_inv_movmnt_schema = StructType([
-    StructField("txn_id", StringType(), True),
-    StructField("inv_loc", StringType(), True),
-    StructField("financial_qty", DoubleType(), True),
-    StructField("net_qty", DoubleType(), True),
-    StructField("expired_qt", DecimalType(38, 0), True),
-    StructField("item_nbr", StringType(), True),
-    StructField("unit_cost", DoubleType(), True),
-    StructField("um_rate", DoubleType(), True),
-    StructField("plant_loc_cd", StringType(), True),
-    StructField("inv_stock_reference", StringType(), True),
-    StructField("stock_type", StringType(), True),
-    StructField("qty_on_hand", DoubleType(), True),
-    StructField("qty_shipped", DoubleType(), True),
-    StructField("cancel_dt", DecimalType(38, 0), True),
-    StructField("flag_active", StringType(), True),
-    StructField("crt_dt", TimestampType(), True),
-    StructField("updt_dt", TimestampType(), True)
-])
-
-# Generate test data
-f_inv_movmnt_data = [
-    # Happy path test data
-    ("txn1", "L1", 100.0, 95.0, 0, "item1", 10.5, 1.0, "PL1", "REF1", "STK1", 500.0, 5.0, None, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    ("txn2", "L2", 200.0, 190.0, 0, "item2", 15.0, 1.0, "PL2", "REF2", "STK2", 300.0, 10.0, None, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    # Edge case: large financial_qty and negative net_qty
-    ("txn3", "L3", 1.0E12, -100.0, 0, "item3", 20.0, 1.0, "PL3", "REF3", "STK3", 700.0, 5.0, None, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    # Error case: out-of-range expired_qt
-    ("txn4", "L4", 0.0, 0.0, -1, "item4", 5.0, 1.0, "PL4", "REF4", "STK4", 0.0, 0.0, None, "N", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    # NULL handling and special characters
-    ("txn5", "L5", None, None, None, "item5✓", 5.5, 1.0, None, "REF5", "STK✓5", None, None, None, None, "2024-03-21T00:00:00.000+0000", None),
-    # Special cases with multi-byte characters
-    ("txn6", "L6", 300.0, 295.0, 1, "item6エ", 8.0, 1.0, "PL6", "REF6", "STK6", 400.0, 5.0, None, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
+# Generate test data for purgo_playground.f_inv_movmnt table
+data = [
+    # Happy path with valid DNSA flag and financial quantities
+    ("txn1", "loc1", 100.0, 120.0, 0, "item1", 10.0, 1.0, "plant1", "ref1", "type1", 1000.0, 100.0, 0, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    ("txn2", "loc2", 150.0, 140.0, 0, "item2", 15.0, 1.5, "plant2", "ref2", "type2", 800.0, 50.0, 0, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    # Edge cases with boundary values
+    ("txn3", "loc3", 0.0, 0.0, 0, "item3", 0.0, 0.0, "plant3", "ref3", "type3", 0.0, 0.0, 0, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    ("txn4", "loc4", 9999999999.99, 9999999999.99, 0, "item4", 9999999999.99, 99.9, "plant4", "ref4", "type4", 999999.99, 0.0, 0, "N", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    # Error cases with invalid combinations
+    ("txn5", "loc5", -100.0, -120.0, 0, "item5", -10.0, -1.0, "plant5", "ref5", "type5", -1000.0, -100.0, 0, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    # NULL handling scenarios
+    (None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None),
+    # Special characters
+    ("txn6", "loc@!", 150.0, 160.0, 0, "item!@#", 20.0, 2.0, "plant@#", "ref!@", "type!@", 900.0, 30.0, 0, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000"),
+    # Multibyte characters
+    ("txn7", "loc7", 200.0, 210.0, 0, "item\u2B50", 25.0, 2.5, "plant\u2764", "ref\u2B50", "type\u2B50", 1100.0, 110.0, 0, "N", "2024-03-21T00:00:00.000+0000", "2024-03-21T01:00:00.000+0000")
 ]
 
-# Create DataFrame using the schema and data
-f_inv_movmnt_df = spark.createDataFrame(f_inv_movmnt_data, schema=f_inv_movmnt_schema)
+columns = ["txn_id", "inv_loc", "financial_qty", "net_qty", "expired_qt", "item_nbr", 
+           "unit_cost", "um_rate", "plant_loc_cd", "inv_stock_reference", "stock_type", 
+           "qty_on_hand", "qty_shipped", "cancel_dt", "flag_active", "crt_dt", "updt_dt"]
 
-# Show DataFrame for verification
-f_inv_movmnt_df.show(truncate=False)
+df = spark.createDataFrame(data, schema=columns)
 
-# SQL Syntax for calculating Inventory at Risk
-f_inv_movmnt_df.createOrReplaceTempView("f_inv_movmnt")
-
-# SQL query for Inventory at Risk calculation
-sql_query = """
-SELECT 
-    SUM(financial_qty) AS inventory_at_risk,
-    (SUM(financial_qty) / (SELECT SUM(financial_qty) FROM f_inv_movmnt WHERE flag_active = 'Y')) * 100 AS percentage_risk
-FROM 
-    f_inv_movmnt
-WHERE 
-    flag_active = 'Y'
-"""
-
-# Execute the SQL query
-risk_calculation_df = spark.sql(sql_query)
-
-# Show result
-risk_calculation_df.show()
+df.show(truncate=False)
