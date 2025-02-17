@@ -1,0 +1,50 @@
+Feature: Manage Unity Catalog Schema "purgo_playground" for Data Analysis
+
+  Background:
+    Given the Unity Catalog with schema "purgo_playground" is set up
+    And the user has necessary access to "purgo_playground"
+
+  Scenario: Successful data retrieval from "purgo_playground" schema
+    Given a dataset exists in the "purgo_playground" schema
+    When a query is executed to retrieve data from the dataset
+    Then the data should be returned in the following format:
+      | column_name | data_type  |
+      | id          | int        |
+      | name        | string     |
+      | created_at  | timestamp  |
+    And the query execution should complete within 2 seconds
+
+  Scenario: Missing dataset in "purgo_playground" schema
+    Given no dataset exists with the name "non_existent_data"
+    When a query is executed to retrieve data from "non_existent_data"
+    Then an error message should be displayed saying "Dataset 'non_existent_data' not found in schema 'purgo_playground'"
+
+  Scenario Outline: Data type validation for new entries
+    Given a user attempts to insert a new entry with <column> as <value> into a dataset 
+    When the entry is validated
+    Then the system should raise an error if the data type of <value> does not match <expected_type>
+
+    Examples:
+      | column     | value          | expected_type |
+      | id         | "abc"          | int           |
+      | name       | 123            | string        |
+      | created_at | "not_a_date"   | timestamp     |
+
+  Scenario: Successful insertion of new data
+    Given a new dataset "new_data" is created in the "purgo_playground" schema with structure:
+      | column_name  | data_type  |
+      | id           | int        |
+      | name         | string     |
+      | created_at   | timestamp  |
+    And valid data with following entry:
+      | id  | name   | created_at         |
+      | 1   | Alice  | 2023-11-01T10:00:00|
+    When the entry is inserted into "new_data"
+    Then the insertion should be successful
+    And a confirmation message "Data insertion successful" should be provided
+
+  Scenario: Error on duplicate entry
+    Given a dataset "new_data" in the "purgo_playground" schema
+    And an entry with id 1 already exists
+    When the user attempts to insert another entry with id 1
+    Then an error message should be displayed saying "Duplicate entry for id: 1 not allowed"
