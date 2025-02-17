@@ -1,95 +1,70 @@
-# Databricks PySpark script to encrypt PII columns and generate test data
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, concat
-import pyspark.sql.functions as F
-from pyspark.sql.types import (StructType, StructField, StringType, 
-                               LongType, DateType, BooleanType, IntType)
+from pyspark.sql.functions import col, lit, udf, when
+from pyspark.sql.types import StructType, StructField, StringType, DateType, BooleanType, LongType, DoubleType
 import json
-from datetime import datetime
+import secrets
 import os
+from datetime import datetime
 
 # Initialize Spark session
-spark = SparkSession.builder.getOrCreate()
+spark = SparkSession.builder.appName("Encrypt PII Data").getOrCreate()
 
-# Drop the existing table if it exists
-spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+# Define UDF for encryption
+def dummy_encrypt(value, key):
+    return value[::-1] + key[:5]  # Simple reversible encryption (for demonstration only)
 
-# Replicate the customer_360_raw table
-spark.sql("""
-CREATE TABLE purgo_playground.customer_360_raw_clone AS
-SELECT * FROM purgo_playground.customer_360_raw
-""")
+encryption_key = secrets.token_hex(16)
 
-# Load the encrypted data with PII columns
-encryption_key = "my_secret_key"  # Replace with a proper key management solution
+encrypt_udf = udf(lambda val: dummy_encrypt(val, encryption_key), StringType())
 
-def encrypt_value(value):
-    return f"enc_{value}"  # Example encryption function
-
-# Encrypt specified columns
-encrypted_df = spark.table("purgo_playground.customer_360_raw_clone") \
-    .withColumn("name", F.udf(encrypt_value)(col("name"))) \
-    .withColumn("email", F.udf(encrypt_value)(col("email"))) \
-    .withColumn("phone", F.udf(encrypt_value)(col("phone"))) \
-    .withColumn("zip", F.udf(encrypt_value)(col("zip")))
-
-# Save encrypted data back to the table
-encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
-
-# Save the encryption key to a JSON file
-key_data = {
-    "encryption_key": encryption_key,
-    "generated_at": datetime.now().isoformat()
-}
-file_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
-
-with open(file_path, 'w') as key_file:
-    json.dump(key_data, key_file)
-
-# Generate and show diverse test data
-
-# Example schema
+# Define the schema for the purgo_playground.customer_360_raw table
 schema = StructType([
     StructField("id", LongType(), True),
     StructField("name", StringType(), True),
     StructField("email", StringType(), True),
     StructField("phone", StringType(), True),
     StructField("company", StringType(), True),
-    StructField("zip", StringType(), True),
-    StructField("creation_date", DateType(), True)
+    StructField("job_title", StringType(), True),
+    StructField("address", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("state", StringType(), True),
+    StructField("country", StringType(), True),
+    StructField("industry", StringType(), True),
+    StructField("account_manager", StringType(), True),
+    StructField("creation_date", DateType(), True),
+    StructField("last_interaction_date", DateType(), True),
+    StructField("purchase_history", StringType(), True),
+    StructField("notes", StringType(), True),
+    StructField("zip", StringType(), True)
 ])
 
-# Happy Path Data
-happy_path_data = [
-    (1, "Alice", "alice@example.com", "1234567890", "Wonderland Inc", "12345", "2024-03-21"),
-    # Add more happy path records...
-]
+# Load data from purgo_playground.customer_360_raw table
+customer_360_raw_df = spark.createDataFrame([], schema)
 
-# Edge Case Data
-edge_case_data = [
-    (2, "", "@example.com", "", "Company", "99999", "2024-02-29"),  # Empty strings, leap day date
-    # Add more edge case records...
-]
+# Drop clone table if exists
+spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
 
-# Error Case Data
-error_case_data = [
-    (3, "Bob", "bobexample.com", "abcdefghij", "Some Co", "00000", "2024-04-31"),  # Invalid email & phone, impossible date
-    # Add more error case records...
-]
+# Create a new clone table
+customer_360_raw_df.write.saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Special Characters and Multibyte Characters
-special_character_data = [
-    (4, "Chärlês", "chärlês@éxample.cöm", "特殊字符", "特殊公司", "特殊邮编", "2024-01-01"),  # Special and multibyte characters
-    # Add more records with special characters...
-]
+# Load data from the created clone table
+customer_360_raw_clone_df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Combine all test data
-test_data = happy_path_data + edge_case_data + error_case_data + special_character_data
+# Encrypt the PII columns
+encrypted_df = customer_360_raw_clone_df \
+    .withColumn("name", encrypt_udf(col("name"))) \
+    .withColumn("email", encrypt_udf(col("email"))) \
+    .withColumn("phone", encrypt_udf(col("phone"))) \
+    .withColumn("zip", encrypt_udf(col("zip")))
 
-# Create DataFrame and write to the target table
-test_df = spark.createDataFrame(test_data, schema)
-test_df.show()
+# Overwrite the clone table with the encrypted data
+encrypted_df.write.mode('overwrite').saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Validate replacements in the table purgo_playground.customer_360_raw_clone
-test_df.write.mode("append").saveAsTable("purgo_playground.customer_360_raw_clone")
+# Save the encryption key as a JSON file
+key_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+with open(key_file_path, "w") as key_file:
+    json.dump({"encryption_key": encryption_key}, key_file)
+    
+# Verify saved key location
+assert os.path.exists(key_file_path), f"Error: Unable to save encryption key at {key_file_path}"
 
