@@ -1,74 +1,80 @@
-from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType, DateType
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, udf
-from pyspark.sql.types import StringType, LongType, IntegerType, DateType
-import datetime
+from pyspark.sql.types import StringType
+from pyspark.sql.functions import current_timestamp
 import json
+import datetime
 
-# Initialize Spark Session
-spark = SparkSession.builder.appName("Test Data Generation").getOrCreate()
+# Initialize Spark session
+spark = SparkSession.builder.appName("Databricks Test Data Generation").getOrCreate()
 
-# Define schema for customer_360_raw_clone as per the requirements
-schema = StructType([
-    StructField("id", LongType(), True),
-    StructField("name", StringType(), True),          # PII column
-    StructField("email", StringType(), True),         # PII column
-    StructField("phone", StringType(), True),         # PII column
-    StructField("company", StringType(), True),
-    StructField("job_title", StringType(), True),
-    StructField("address", StringType(), True),
-    StructField("city", StringType(), True),
-    StructField("state", StringType(), True),
-    StructField("country", StringType(), True),
-    StructField("industry", StringType(), True),
-    StructField("account_manager", StringType(), True),
-    StructField("creation_date", DateType(), True),
-    StructField("last_interaction_date", DateType(), True),
-    StructField("purchase_history", StringType(), True),
-    StructField("notes", StringType(), True),
-    StructField("zip", StringType(), True),           # PII column
-    StructField("is_churn", IntegerType(), True)
-])
+# Test DataFrame schema
+schema = """
+    id BIGINT,
+    name STRING,
+    email STRING,
+    phone STRING,
+    company STRING,
+    job_title STRING,
+    address STRING,
+    city STRING,
+    state STRING,
+    country STRING,
+    industry STRING,
+    account_manager STRING,
+    creation_date DATE,
+    last_interaction_date DATE,
+    purchase_history STRING,
+    notes STRING,
+    zip STRING
+"""
 
-# Sample test data with various scenarios
+# Create test data including different scenarios such as NULLs, edge cases, etc.
 data = [
-    (1, "John Doe", "john.doe@example.com", "1234567890", "Acme Corp", "Software Engineer", "123 Elm Street", "Anytown", "CA", "USA", "Technology", "Alice Smith", datetime.date(2023, 3, 14), datetime.date(2023, 9, 22), "Purchase A", "Notes A", "90210", 0),
-    (2, "Jane Smith", "jane.smith@example.com", "0987654321", "Beta Inc", "Data Analyst", "456 Oak Avenue", "Othertown", "NY", "USA", "Finance", "Bob Johnson", datetime.date(2023, 4, 20), datetime.date(2023, 10, 5), "Purchase B", "Notes B", "10001", 1),
-    # Edge cases
-    (3, None, None, None, "Gamma LLC", "Manager", "789 Pine Road", "Metropolis", "IL", "USA", "Retail", "Charlie Brown", datetime.date(2023, 1, 1), datetime.date(2023, 1, 1), "Purchase C", "Notes C", "60601", 0),
-    # Special characters and multi-byte characters
-    (4, "Renée O'Connor", "renée.oconnor@example.com", "+1-800-555-5555", "Delta & Co", "Consultant", "101 Maple Street", "New Town", "WA", "USA", "Consulting", "David Lee", datetime.date(2023, 2, 29), datetime.date(2023, 8, 30), "Purchase D", "Notes D", "98101", 1),
-    # Invalid Email and Phone cases (happy path with error scenarios)
-    (5, "Alex White", "invalid-email", "invalid-phone", "Epsilon Partners", "CEO", "202 Birch Street", "Old City", "TX", "USA", "Real Estate", "Eve Miller", datetime.date(2023, 7, 4), datetime.date(2023, 8, 15), "Purchase E", "Notes E", "75001", 0)
+    (1, "Alice Smith", "alice@example.com", "1234567890", "ABC Corp", "Manager", "123 Elm St", "Metropolis", "NY", "USA", "Finance", "John Doe", "2024-01-01", "2024-02-28", "None", "First purchase in 2024", "10001"),
+    (2, "Bob Johnson", "bob.johnson@example.com", "0987654321", None, "Director", None, "Gotham", "NJ", "USA", "IT", "Jane Doe", None, "2024-03-01", "Repeat customer", "Important client", "07001"),
+    (3, "Carlos López", "calos.lopez@example.com", "+6123456789", "XYZ Ltd", "CEO", "789 Pine St", "Star City", "CA", "USA", "Marketing", "Mary Jane", "2023-12-31", "2024-04-01", "Frequent buyer", None, "90001"),
+    (4, "李华", "lihua@example.cn", "+861234567890", "Huawei", "Tech Lead", "456 Bamboo Ave", "Beijing", None, "China", "Telecom", "Ming Zhao", "2022-01-01", "2024-03-15", "Multiple transactions", "Long-time customer with important history", "100000"),
+    (5, None, "invalid-email", "not-a-phone", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "2024-03-21", "2024-03-22", "Corrupted data", "Data issues noted", None),
+    (6, "Eve Adams", "eve.adams@example.org", "9998887777", "Corp Inc", "CFO", "101 Maple Dr", None, "TX", "USA", "Healthcare", "Tom White", "2024-02-29", "2024-03-31", None, "Note about Eve Adams", "75001"),
+    (7, "François Dubois", "francois@exemple.fr", "+33123456789", "Café de Paris", "Owner", "333 Champs Elysees", "Paris", None, "France", "Hospitality", "Pierre Dubois", "2024-01-15", None, None, "Loyal customer from France", "75000")
 ]
 
 # Create DataFrame
-df = spark.createDataFrame(data, schema)
+df = spark.createDataFrame(data, schema=schema)
 
-# Define a dummy encryption function for demonstration purposes
-def encrypt(value):
-    if value is None:
-        return None
-    return f"encrypted_{value}"
+# Define a simple encryption placeholder function. Replace this with appropriate encryption logic.
+def encrypt_pii(value: str) -> str:
+    if value:
+        return f"enc({value})"
+    return value
 
-# Register UDFs for encryption
-encrypt_udf = udf(encrypt, StringType())
+# Register UDF
+encrypt_udf = udf(encrypt_pii, StringType())
 
-# Apply encryption to PII columns
-pii_columns = ["name", "email", "phone", "zip"]
-for column in pii_columns:
-    df = df.withColumn(column, encrypt_udf(col(column)))
+# Encrypt PII columns
+encrypted_df = df.withColumn("name", encrypt_udf(col("name"))) \
+    .withColumn("email", encrypt_udf(col("email"))) \
+    .withColumn("phone", encrypt_udf(col("phone"))) \
+    .withColumn("zip", encrypt_udf(col("zip")))
 
-# Save encrypted data into customer_360_raw_clone
-df.write.format("delta").mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+# Show the encrypted_df for validation
+encrypted_df.show(truncate=False)
 
-# Generate and save encryption key as JSON
-encryption_key = {"key": "example_key_for_encryption"}
-current_datetime = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-key_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+# Save DataFrame as Delta table
+destination_table = "purgo_playground.customer_360_raw_clone"
+encrypted_df.write.format("delta").mode("overwrite").saveAsTable(destination_table)
 
-# Save encryption key to JSON file
-with open(key_path, 'w') as json_file:
-    json.dump(encryption_key, json_file)
+# Save the encryption key to JSON file
+encryption_key = {
+    "name_key": "key_for_name",
+    "email_key": "key_for_email",
+    "phone_key": "key_for_phone",
+    "zip_key": "key_for_zip"
+}
+current_datetime = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+key_filename = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
 
-
+# Save encryption key file
+with open(key_filename, "w") as f:
+    json.dump(encryption_key, f)
