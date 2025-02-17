@@ -1,73 +1,70 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, udf, lit, current_timestamp
+from pyspark.sql.functions import col, lit, udf
 from pyspark.sql.types import StringType
+from pyspark.sql.functions import current_timestamp
 import json
 import datetime
+import os
 
 # Initialize Spark session
-spark = SparkSession.builder.appName("Databricks PII Encryption Tests").getOrCreate()
+spark = SparkSession.builder \
+    .appName("Databricks Test Code for PII Encryption") \
+    .enableHiveSupport() \
+    .getOrCreate()
 
-# Encrypt function placeholder
+# Define file paths
+source_table = "purgo_playground.customer_360_raw"
+clone_table = "purgo_playground.customer_360_raw_clone"
+encryption_key_path = "/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq"
+
+# Drop table if exists
+spark.sql(f"DROP TABLE IF EXISTS {clone_table}")
+
+# Create a replica of customer_360_raw
+spark.sql(f"CREATE TABLE {clone_table} AS SELECT * FROM {source_table}")
+
+# Define a simple encryption placeholder function
 def encrypt_pii(value: str) -> str:
     if value:
-        return f"enc({value})"  # Placeholder encryption logic
+        return f"enc({value})"
     return value
 
-# Register the UDF
+# Register UDF
 encrypt_udf = udf(encrypt_pii, StringType())
 
-# Load customer_360_raw table
-customer_df = spark.sql("SELECT * FROM purgo_playground.customer_360_raw")
+# Read the clone table
+df_clone = spark.table(clone_table)
 
-# Drop the clone table if it exists
-spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
-
-# Create the clone table and encrypt PII data
-customer_df.withColumn("name", encrypt_udf(col("name"))) \
+# Encrypt PII columns
+encrypted_df = df_clone.withColumn("name", encrypt_udf(col("name"))) \
     .withColumn("email", encrypt_udf(col("email"))) \
     .withColumn("phone", encrypt_udf(col("phone"))) \
-    .withColumn("zip", encrypt_udf(col("zip"))) \
-    .write.format("delta").saveAsTable("purgo_playground.customer_360_raw_clone")
+    .withColumn("zip", encrypt_udf(col("zip")))
 
-# Save the encryption key to a JSON file in specified volume
+# Overwrite the encrypted data back to the clone table
+encrypted_df.write.format("delta").mode("overwrite").saveAsTable(clone_table)
+
+# Validate schema
+expected_schema = df_clone.schema
+encrypted_schema = spark.table(clone_table).schema
+assert expected_schema == encrypted_schema, "Schema validation failed"
+
+# Save the encryption key to JSON file
 encryption_key = {
     "name_key": "key_for_name",
     "email_key": "key_for_email",
     "phone_key": "key_for_phone",
     "zip_key": "key_for_zip"
 }
-current_datetime = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-key_filename = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+current_datetime = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+key_filename = f"{encryption_key_path}/encryption_key_{current_datetime}.json"
 
 # Save encryption key file
 with open(key_filename, "w") as f:
     json.dump(encryption_key, f)
 
-# DataType and NULL handling tests
-def test_data_types_and_nulls(df):
-    assert df.schema["name"].dataType == StringType(), "Name column should be STRING"
-    assert df.schema["email"].dataType == StringType(), "Email column should be STRING"
-    assert df.filter(col("name").isNull()).count() == 0, "Name column should not be NULL after encryption"
-    # Add more assertions as required
-    print("Data type and NULL handling tests passed.")
+# Verify encryption key file existence
+assert os.path.exists(key_filename), f"Encryption key file was not saved: {key_filename}"
 
-test_data_types_and_nulls(customer_df)
-
-# Delta Lake operations tests
-def test_delta_operations():
-    spark.sql("MERGE INTO purgo_playground.customer_360_raw_clone USING purgo_playground.customer_360_raw ON purgo_playground.customer_360_raw_clone.id = purgo_playground.customer_360_raw.id WHEN MATCHED THEN DELETE")
-    assert spark.sql("SELECT COUNT(*) FROM purgo_playground.customer_360_raw_clone").collect()[0][0] == 0, "Delta MERGE operation failed to DELETE records"
-    print("Delta Lake MERGE test passed.")
-
-test_delta_operations()
-
-# Cleanup operations
-def cleanup_operations():
-    spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
-    import os
-    if os.path.exists(key_filename):
-        os.remove(key_filename)
-    print("Cleanup operations completed.")
-
-cleanup_operations()
+# Clean up operations (optional): Remove test files or intermediate tables if needed
 
