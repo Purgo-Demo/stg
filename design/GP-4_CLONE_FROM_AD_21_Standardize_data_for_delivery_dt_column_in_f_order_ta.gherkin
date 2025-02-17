@@ -1,0 +1,49 @@
+Feature: Data Standardization Verification for Delivery Date
+
+  Background:
+    Given the table "agilisium_playground.purgo_playground.f_order" exists
+
+  Scenario: Validate delivery_dt is 100% Decimal (38,0) and correctly formatted
+    Given a delivery date "20240910" in decimal (38,0) format
+    When the delivery date is extracted from "f_order" table
+    Then the delivery date should conform to the format "yyyymmdd"
+    And the delivery date should be of type decimal (38,0)
+
+  Scenario Outline: Check different formats and handle errors
+    Given delivery_dt value "<delivery_date>"
+    When the SQL logic checks the format and type
+    Then the column delivery_dt should be valid
+    And the format should be yyyymmdd
+    And the type should be decimal (38,0)
+    And if not, an error should be raised with message "Invalid delivery date format or type"
+
+    Examples:
+      | delivery_date |
+      | 20240910      |
+      | 20240105      |
+      | 20241231      |
+      | 20231301      | // Non-existent date
+      | 2024abcd      | // Incorrect type
+
+  Scenario: Handling error condition for incorrect delivery date format
+    Given a delivery date "2024XXXX"
+    When the SQL logic processes the delivery date
+    Then an error message "Invalid delivery date format or type" should be raised
+
+  Scenario: Handling error condition for incorrect delivery date type
+    Given a delivery date "abcdefgh"
+    When the SQL logic processes the delivery date
+    Then an error message "Invalid delivery date format or type" should be raised
+
+Technical Details:
+  - The delivery date from the table "f_order" should be checked in its SQL environment.
+  - Ensure the delivery_dt is castable to a decimal (38,0) if necessary.
+  - Each date value in delivery_dt should be validated against the "yyyymmdd" format.
+  - Maintain and ensure all data integrities and data type consistencies.
+  - Capture and log meaningful error messages for any discrepancies or failures.
+
+Acceptance Criteria:
+  - The process should validate each delivery_dt value to be in the decimal (38,0) format.
+  - All valid delivery dates should strictly follow the "yyyymmdd" format without any error.
+  - SQL execution should be compatible with the database dialect used in target environments.
+  - All invalid conditions must produce a clear, descriptive error message: "Invalid delivery date format or type."
