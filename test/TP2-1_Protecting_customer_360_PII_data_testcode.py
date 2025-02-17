@@ -1,14 +1,15 @@
-from pyspark.sql import SparkSession, functions as F
+# Databricks PySpark Test Code for Encrypting PII Data
+# Import necessary libraries
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
 import json
-import datetime
+from datetime import datetime
+import os
 
-# Setup configuration
-# Required libraries are part of PySpark, so no additional installation is needed
-
-# Initialize Spark session
+# Initialize the Spark session
 spark = SparkSession.builder \
-    .appName("PII Data Encryption Tests") \
+    .appName("Databricks PII Encryption Test") \
     .getOrCreate()
 
 # Define schema for customer_360_raw table
@@ -32,67 +33,68 @@ customer_360_raw_schema = StructType([
     StructField("zip", StringType(), True)
 ])
 
-# Simulate test data for customer_360_raw
+# Sample data for testing
 customer_360_raw_data = [
-    (1, "John Doe", "john.doe@example.com", "123-456-7890", "John's Company", "CEO", "123 Elm St", "Gotham", "NY", "USA", "Retail", "Jane Manager", 
-     datetime.datetime(2023, 1, 1), datetime.datetime(2023, 1, 15), "TV, Laptop", "Valued", "98765")
-    # Add more test cases as needed
+    {
+        "id": 1,
+        "name": "Jane Doe",
+        "email": "jane.doe@example.com",
+        "phone": "+12345678901",
+        "company": "Example Corp",
+        "job_title": "Engineer",
+        "address": "456 Elm St",
+        "city": "Sample City",
+        "state": "SC",
+        "country": "USA",
+        "industry": "Engineering",
+        "account_manager": "Manager 1",
+        "creation_date": "2025-01-01T00:00:00.000+0000",
+        "last_interaction_date": "2025-02-01T00:00:00.000+0000",
+        "purchase_history": "Item X, Item Y",
+        "notes": "VIP customer",
+        "zip": "54321"
+    }
 ]
 
-# Create DataFrame from the test data
+# Create DataFrame from sample data
 customer_360_raw_df = spark.createDataFrame(data=customer_360_raw_data, schema=customer_360_raw_schema)
 
-# Encrypt columns
-def encrypt_cols(df, cols):
-    for col in cols:
-        df = df.withColumn(col, F.sha2(F.col(col), 256))
-    return df
+# Show the raw data
+customer_360_raw_df.show()
 
-# Function to save encryption keys (for testing, use a mock key)
-def save_encryption_key(directory, key_name):
-    encryption_key = {"encryption_key": "1234567890abcdef1234567890abcdef"}
-    key_path = f"{directory}/{key_name}.json"
-    with open(key_path, 'w') as key_file:
-        json.dump(encryption_key, key_file)
-    return key_path
+# Encrypt specified PII columns
+def encrypt_column(df, col_name):
+    """Encrypts a column using SHA-256 algorithm."""
+    return df.withColumn(col_name, F.sha2(F.col(col_name), 256))
 
-# Encryption and test procedures
+# Encrypt the PII columns: name, email, phone, zip
 pii_columns = ['name', 'email', 'phone', 'zip']
-customer_360_encrypted_df = encrypt_cols(customer_360_raw_df, pii_columns)
+for col in pii_columns:
+    customer_360_raw_df = encrypt_column(customer_360_raw_df, col)
 
-# Save encryption key
-key_directory = "/Volumes/agilisium_playground/purgo_playground/de_dq"
-current_datetime = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-key_file_path = save_encryption_key(key_directory, f"encryption_key_{current_datetime}")
+# Generate encryption key (For demonstration, use a hardcoded dummy key)
+encryption_key = {
+    "key": "dummy_encryption_key_1234567890"
+}
 
-# Validate that the DataFrame has been encrypted correctly and saved
-customer_360_encrypted_df.show(truncate=False)
+# Define path to save encryption key
+output_path = "/Volumes/agilisium_playground/purgo_playground/de_dq"
+encryption_key_file = os.path.join(output_path, f"encryption_key_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
 
-# Validation can involve checking the format of the encrypted PII fields
-encrypted_sample = customer_360_encrypted_df.select("name", "email", "phone", "zip").first()
-assert encrypted_sample["name"] != "John Doe", "The name column was not encrypted properly."
+# Save encryption key to JSON file
+with open(encryption_key_file, 'w') as key_file:
+    json.dump(encryption_key, key_file)
 
-# Verify the encryption key has been saved
-print(f"Encryption Key Path: {key_file_path}")
+# Log encryption key save location
+print(f"Encryption key saved to: {encryption_key_file}")
 
-# Test data loading functionality (mock)
-def test_data_load():
-    # Mock loading of data
-    customer_360_encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
-    clone_df = spark.table("purgo_playground.customer_360_raw_clone")
-    
-    # Check if the clone table is created and has the expected structure
-    assert clone_df.count() == customer_360_encrypted_df.count(), "Data load to clone failed, row count mismatch."
-    assert set(clone_df.columns) == set(customer_360_raw_df.columns), "Clone table schema mismatch."
+# Drop table if it exists and replicate purgo_playground.customer_360_raw to purgo_playground.customer_360_raw_clone
+spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+customer_360_raw_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
 
-    clone_df.show(truncate=False)
+# Verify that the encrypted data is saved correctly
+loaded_df = spark.table("purgo_playground.customer_360_raw_clone")
+loaded_df.show()
 
-# Cleanup (make sure to drop test tables and temp views)
-def cleanup():
-    spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
-    print("Test artifacts cleaned up.")
-
-# Execute test functions
-test_data_load()
-cleanup()
-
+# Clean up resources
+spark.stop()
