@@ -1,0 +1,80 @@
+Feature: Data Quality Checks for Tepezza Sales Data
+
+  Background:
+    Given the sales data is loaded into Unity Catalog schema 'purgo_playground'
+    And the DQ rules are defined in 'Sales_DQ_Rules.xlsx'
+
+  Scenario: Mandatory Fields Check
+    Given a record with Shipment_Status "Shipped"
+    When checking for null values
+    Then Order_ID, Product_Name, Customer_ID, Shipment_Date, and Quantity must not be NULL
+
+  Scenario Outline: Date Consistency Check
+    Given the Order_Date is "<Order_Date>"
+    And the Shipment_Date is "<Shipment_Date>"
+    And the Delivery_Scheduled is "<Delivery_Scheduled>"
+    When comparing date sequences
+    Then Order_Date should be earlier than Shipment_Date
+    And Shipment_Date should be earlier than Delivery_Scheduled
+
+    Examples:
+      | Order_Date  | Shipment_Date | Delivery_Scheduled |
+      | 2024-10-01  | 2024-10-03    | 2024-10-10         |
+      | 2024-10-02  | 2024-10-05    | 2024-10-12         |
+
+  Scenario: Range Check for Demand and Quantity
+    Given a record with Demand as 25 and Quantity as 15
+    When verifying realistic ranges
+    Then Demand should be between 10 and 100
+    And Quantity should be between 1 and 50
+
+  Scenario: Status Consistency Check
+    Given the Shipment_Status is "Shipped"
+    When validating presence of attributes
+    Then Shipment_Date, Delivery_Scheduled, and Line_Number should be populated
+
+    Given the Shipment_Status is "On Hold"
+    When validating presence of attributes
+    Then Shipment_Date, Delivery_Scheduled, and Line_Number can be NULL
+
+  Scenario: Unique Identifier Check
+    Given the sales data includes Order_IDs
+    When checking for duplicates
+    Then all Order_IDs must be unique
+
+  Scenario: Returned Product Validation
+    Given Is_Returned is "Yes"
+    And Shipment_Date is "<Shipment_Date>"
+    When validating return process
+    Then Shipment_Date must exist
+    And a reverse logistics process should be initiated
+
+    Examples:
+      | Shipment_Date |
+      | 2024-10-04    |
+      | 2024-10-05    |
+
+  Scenario: Correct Unit Shipment Type
+    Given the Unit_Shipment_Type is "Carton"
+    And the Quantity ordered is 5
+    When checking shipment type validity
+    Then Quantity less than 10 should not be shipped in "Carton"
+
+  Scenario Outline: Price Calculation Accuracy
+    Given the Quantity is "<Quantity>"
+    And the Unit_Price is "<Unit_Price>"
+    When calculating Total_Price
+    Then Total_Price should match Quantity multiplied by Unit_Price
+    And any discrepancy must raise a validation error
+
+    Examples:
+      | Quantity | Unit_Price |
+      | 10       | 50         |
+      | 5        | 60         |
+
+  Scenario: Error Reporting for Invalid Data
+    Given data validation checks are performed
+    When a validation rule is breached
+    Then the error should be recorded in 'purgo_playground.dq_reports'
+    And the report should include Order_ID and details of the failed rule
+
