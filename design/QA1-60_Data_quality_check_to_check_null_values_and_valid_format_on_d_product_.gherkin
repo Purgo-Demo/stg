@@ -1,0 +1,59 @@
+Feature: Data Quality Check for d_product Table
+
+  Background:
+    Given the purgo_playground schema is available
+    And the d_product table is accessed
+
+  Scenario: Happy Path - Non-null Validation for item_nbr and sellable_qty
+    Given the d_product table is being validated
+    When checking if 'item_nbr' and 'sellable_qty' are not null
+    Then the SQL should return a count of records where 'item_nbr' is null
+    And display 5 sample records with null 'item_nbr'
+    Then the SQL should return a count of records where 'sellable_qty' is null
+    And display 5 sample records with null 'sellable_qty'
+
+  Scenario: Happy Path - Date Format Validation for prod_exp_dt
+    Given the d_product table is being validated
+    When checking the 'prod_exp_dt' format
+    Then the SQL should return a count of records where 'prod_exp_dt' is not in yyyymmdd format
+    And display 5 sample records with incorrect 'prod_exp_dt' format
+
+  Scenario Outline: Error Scenario - Handle Missing Data
+    Given the d_product table is being validated
+    When checking for '<column>' null values
+    Then the validation rule must ensure '<column>' is not null
+    And if '<column>' is null, log an error: "Error: <column> contains null values in d_product table."
+
+    Examples:
+      | column       |
+      | item_nbr     |
+      | sellable_qty |
+
+  Scenario Outline: Error Scenario - Invalid Date Format
+    Given the d_product table is being validated
+    When checking for '<format>' of 'prod_exp_dt'
+    Then the validation rule must ensure 'prod_exp_dt' is in '<format>'
+    And if 'prod_exp_dt' is not in '<format>', log an error: "Error: prod_exp_dt is not in <format> in d_product table."
+
+    Examples:
+      | format   |
+      | yyyymmdd |
+
+  Scenario: Reporting and Storage of Results
+    Given data quality checks have been performed
+    Then results should be stored in purgo_playground.dq_reports table
+    And reports must include mandatory fields check and date consistency check
+    And any detected issues must be flagged for review by Business Analyst
+
+  Scenario: Define and Assign Roles
+    Given data quality checks may detect issues
+    When issues are detected
+    Then assign the role for addressing issues to Business Analyst
+    And define criteria for issue criticality
+
+  Scenario: Prepare Environment Prerequisites
+    Given SQL queries are to be executed
+    When preparing environment
+    Then ensure purgo_playground schema is operational
+    And check for performance requirements
+    And confirm any dependencies are addressed before execution
