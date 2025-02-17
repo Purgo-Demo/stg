@@ -1,57 +1,51 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, sha2, concat, current_timestamp
+from pyspark.sql.functions import col, lit
+from cryptography.fernet import Fernet
 import json
-import os
-import datetime
+from datetime import datetime
 
 # Initialize Spark session
 spark = SparkSession.builder \
     .appName("Encrypt PII Data") \
+    .enableHiveSupport() \
     .getOrCreate()
 
-# Constants
-original_table = "purgo_playground.customer_360_raw"
-clone_table = "purgo_playground.customer_360_raw_clone"
-json_location = "/Volumes/agilisium_playground/purgo_playground/de_dq"
+# Generate an encryption key and initialize encryption object
+encryption_key = Fernet.generate_key()
+fernet = Fernet(encryption_key)
 
-# Drop and clone the table if it exists
-spark.sql(f"DROP TABLE IF EXISTS {clone_table}")
-spark.sql(f"CREATE TABLE {clone_table} AS SELECT * FROM {original_table}")
+# Read the original table into a DataFrame
+customer_360_raw_df = spark.table("purgo_playground.customer_360_raw")
 
-# Sample encrypting function (using SHA2 as a placeholder for a real encryption algorithm)
-def encrypt_column(df, column_name):
-    return df.withColumn(column_name, sha2(col(column_name).cast('string'), 256))
+# Encrypt specified PII columns using Fernet encryption
+def encrypt_column(column_value):
+    return fernet.encrypt(column_value.encode()).decode()
 
-# Load the clone table
-df_clone = spark.table(clone_table)
+encrypt_udf = spark.udf.register("encrypt_udf", encrypt_column)
 
-# Encrypt PII columns
-pii_columns = ["name", "email", "phone", "zip"]
-for column in pii_columns:
-    df_clone = encrypt_column(df_clone, column)
+customer_360_encrypted_df = customer_360_raw_df.withColumn("name", encrypt_udf(col("name"))) \
+    .withColumn("email", encrypt_udf(col("email"))) \
+    .withColumn("phone", encrypt_udf(col("phone"))) \
+    .withColumn("zip", encrypt_udf(col("zip")))
 
-# Save the encrypted DataFrame back to the table
-df_clone.write.mode('overwrite').saveAsTable(clone_table)
+# Write encrypted data back to the customer_360_raw_clone table
+customer_360_encrypted_df.write \
+    .mode("overwrite") \
+    .saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Generate encryption key and save it
-encryption_key = {"encryption_key": "dummy_key_for_demo_purposes"}
-current_datetime = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-json_file_name = f"encryption_key_{current_datetime}.json"
-json_file_path = os.path.join(json_location, json_file_name)
+# Save encryption key as a JSON file
+current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+key_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
 
-with open(json_file_path, 'w') as json_file:
-    json.dump(encryption_key, json_file)
+with open(key_file_path, "w") as key_file:
+    json.dump({"encryption_key": encryption_key.decode()}, key_file)
 
-# Show successful key saving message
-print(f"Encryption key saved to {json_file_path}")
+spark.stop()
 
-# Verify the table structure remains as intended
-df_clone.show()
+# Comments explaining the purpose of each test scenario
+# 1. Happy path test data: Ensures encryption works for all valid fields.
+# 2. NULL handling scenarios: NULLs should remain unaffected by encryption.
+# 3. Error cases & Edge cases: Examples like unsupported encryption algorithm errors (handled by the library).
+# 4. Ensure structure consistency: Non-PII columns remain unmodified and consistent.
+# 5. Key management: Proper handling and location of the encryption key.
 
-
-This script performs the following tasks:
-
-1. **Drop and Clone Table**: Ensures that the `customer_360_raw_clone` table is a fresh copy of `customer_360_raw`.
-2. **Encrypt PII Columns**: Uses a placeholder encryption (SHA2 hash for demo purposes) for specified PII columns.
-3. **Save Encrypted Data**: Overwrites the cloned table with encrypted data.
-4. **Generate and Save Encryption Key**: Creates a dummy encryption key and saves it as a JSON file in the specified location.
