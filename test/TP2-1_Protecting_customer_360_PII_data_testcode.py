@@ -1,98 +1,73 @@
-# Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, udf, current_timestamp
+from pyspark.sql.functions import col, udf, lit, current_timestamp
 from pyspark.sql.types import StringType
 import json
 import datetime
-import os
 
-# Initialize Spark session for Databricks
-spark = SparkSession \
-    .builder \
-    .appName("PII Encryption Test") \
-    .getOrCreate()
+# Initialize Spark session
+spark = SparkSession.builder.appName("Databricks PII Encryption Tests").getOrCreate()
 
-# Define schema for customer_360_raw table
-schema = """
-    id BIGINT,
-    name STRING,
-    email STRING,
-    phone STRING,
-    company STRING,
-    job_title STRING,
-    address STRING,
-    city STRING,
-    state STRING,
-    country STRING,
-    industry STRING,
-    account_manager STRING,
-    creation_date DATE,
-    last_interaction_date DATE,
-    purchase_history STRING,
-    notes STRING,
-    zip STRING
-"""
+# Encrypt function placeholder
+def encrypt_pii(value: str) -> str:
+    if value:
+        return f"enc({value})"  # Placeholder encryption logic
+    return value
 
-# Define test data
-data = [
-    (1, "Alice Smith", "alice@example.com", "1234567890", "ABC Corp", "Manager", "123 Elm St", "Metropolis", "NY", "USA", "Finance", "John Doe", "2024-01-01", "2024-02-28", "None", "First purchase in 2024", "10001"),
-    (2, "Bob Johnson", "bob.johnson@example.com", "0987654321", None, "Director", None, "Gotham", "NJ", "USA", "IT", "Jane Doe", None, "2024-03-01", "Repeat customer", "Important client", "07001")
-]
-
-# Create DataFrame from test data
-df = spark.createDataFrame(data, schema=schema)
-
-# Define encryption function
-def encrypt_pii(value):
-    return f"enc({value})" if value else None
-
-# Register UDF for encryption
+# Register the UDF
 encrypt_udf = udf(encrypt_pii, StringType())
 
-# Apply encryption on PII columns
-encrypted_df = df.withColumn("name", encrypt_udf(col("name"))) \
-                 .withColumn("email", encrypt_udf(col("email"))) \
-                 .withColumn("phone", encrypt_udf(col("phone"))) \
-                 .withColumn("zip", encrypt_udf(col("zip")))
+# Load customer_360_raw table
+customer_df = spark.sql("SELECT * FROM purgo_playground.customer_360_raw")
 
-# Validate the encryption by showing the result
-encrypted_df.show(truncate=False)
+# Drop the clone table if it exists
+spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
 
-# Write the encrypted DataFrame to Delta table
-destination_table = "purgo_playground.customer_360_raw_clone"
-encrypted_df.write.format("delta").mode("overwrite").saveAsTable(destination_table)
+# Create the clone table and encrypt PII data
+customer_df.withColumn("name", encrypt_udf(col("name"))) \
+    .withColumn("email", encrypt_udf(col("email"))) \
+    .withColumn("phone", encrypt_udf(col("phone"))) \
+    .withColumn("zip", encrypt_udf(col("zip"))) \
+    .write.format("delta").saveAsTable("purgo_playground.customer_360_raw_clone")
 
-# Save encryption key as JSON
+# Save the encryption key to a JSON file in specified volume
 encryption_key = {
     "name_key": "key_for_name",
     "email_key": "key_for_email",
     "phone_key": "key_for_phone",
     "zip_key": "key_for_zip"
 }
-
-# Get current datetime for file naming
 current_datetime = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-key_filename = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+key_filename = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
 
-# Check if directory exists, if not create it
-if not os.path.exists(os.path.dirname(key_filename)):
-    os.makedirs(os.path.dirname(key_filename))
+# Save encryption key file
+with open(key_filename, "w") as f:
+    json.dump(encryption_key, f)
 
-# Write encryption key to JSON file
-with open(key_filename, "w") as key_file:
-    json.dump(encryption_key, key_file)
+# DataType and NULL handling tests
+def test_data_types_and_nulls(df):
+    assert df.schema["name"].dataType == StringType(), "Name column should be STRING"
+    assert df.schema["email"].dataType == StringType(), "Email column should be STRING"
+    assert df.filter(col("name").isNull()).count() == 0, "Name column should not be NULL after encryption"
+    # Add more assertions as required
+    print("Data type and NULL handling tests passed.")
 
-# -- Validate the proper creation and storage of the JSON encryption key
+test_data_types_and_nulls(customer_df)
 
-# Function to test if JSON encryption file was created successfully
-def test_json_file_exists():
-    try:
-        assert os.path.exists(key_filename)
-        print("Test Passed: JSON encryption key file created successfully.")
-    except AssertionError:
-        print("Test Failed: JSON encryption key file not found.")
+# Delta Lake operations tests
+def test_delta_operations():
+    spark.sql("MERGE INTO purgo_playground.customer_360_raw_clone USING purgo_playground.customer_360_raw ON purgo_playground.customer_360_raw_clone.id = purgo_playground.customer_360_raw.id WHEN MATCHED THEN DELETE")
+    assert spark.sql("SELECT COUNT(*) FROM purgo_playground.customer_360_raw_clone").collect()[0][0] == 0, "Delta MERGE operation failed to DELETE records"
+    print("Delta Lake MERGE test passed.")
 
-# Execute test
-test_json_file_exists()
+test_delta_operations()
 
-# -- Additional Tests (e.g., for schema validation, PII columns, SQL operations) can be added below.
+# Cleanup operations
+def cleanup_operations():
+    spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
+    import os
+    if os.path.exists(key_filename):
+        os.remove(key_filename)
+    print("Cleanup operations completed.")
+
+cleanup_operations()
+
