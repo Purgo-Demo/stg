@@ -1,0 +1,69 @@
+Feature: Real-Time Calculation of Inventory at Risk
+
+  As a data engineer,
+  I want to calculate the Inventory at Risk in real-time
+  So that I can ensure that manufacturing high-quality drug substances meet regulatory standards.
+
+  Background:
+    Given the following tables in Unity Catalog purgo_playground schema
+      | Table                |
+      | d_product           |
+      | d_product_clone     |
+      | d_product_hist      |
+      | d_product_prep      |
+      | d_product_sk        |
+      | d_product_vw        |
+      | d_product_vw_clone  |
+      | f_inv_movmnt        |
+
+  Scenario: Calculate Inventory at Risk with DNSA Flag Active
+    Given a DNSA flag value "Y" in f_inv_movmnt table
+    When the financial_qty is summed for all rows where flag_active is "Y"
+    Then calculate the inventory at risk as total financial_qty
+    And calculate the percentage of inventory at risk using the formula
+      """
+      Percentage of Inventory at Risk = (inventory at risk / total inventory) * 100
+      """
+    And save the results for reporting
+
+  Scenario Outline: Calculate Inventory at Risk with Variable DNSA Flags
+    Given the DNSA flag value "<dnsa_flag>" in f_inv_movmnt table
+    When the financial_qty is summed for all rows where flag_active is "<flag_active>"
+    Then calculate the inventory at risk as total financial_qty
+    And calculate the percentage of inventory at risk using the formula
+      """
+      Percentage of Inventory at Risk = (inventory at risk / total inventory) * 100
+      """
+    Examples:
+      | dnsa_flag | flag_active |
+      | "Y"       | "Y"         |
+      | "N"       | "Y"         |
+
+  Scenario: Error when DNSA Flag Source is Unknown
+    Given an unknown DNSA flag source
+    When the source is not specified for dnsa_flag
+    Then return an error message "DNSA Flag source not specified"
+    And log the issue for further analysis
+    
+  Scenario: Error when Total Inventory Calculation is Unknown
+    Given the total inventory value is not provided
+    When unable to access necessary tables for inventory calculation
+    Then return an error message "Total Inventory calculation not available"
+    And notify the technical team for resolution
+
+  Scenario: Error in Real-Time Calculation Setup
+    Given a real-time processing requirement
+    When necessary components or technologies are not implemented
+    Then return an error message "Real-time calculation setup incomplete"
+    And send an alert to the architectural design team
+
+  Scenario Outline: Error in Data Validation and Dependencies
+    Given the update frequency is "<update_frequency>"
+    When critical data dependencies are "<dependencies>"
+    Then ensure that the data is validated against the current snapshot
+    And return an error "Stale data may result in inaccurate calculations" if data is delayed
+    Examples:
+      | update_frequency | dependencies           |
+      | "hourly"         | "inventory movements"  |
+      | "daily"          | "product master"       |
+
