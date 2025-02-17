@@ -1,0 +1,57 @@
+Feature: Transfer and Transform Customer File Data in Databricks
+
+  To automate the process of transferring a CSV file from a client's Databricks workspace to the target workspace using the Databricks API and transform the data across bronze, silver, and gold layers in Unity Catalog schema `purgo_playground`.
+
+  Background:
+    Given the client file details are specified in "client_file_details.xlsx"
+    And the Unity Catalog schema `purgo_playground` is set up
+
+  Scenario Outline: Transfer CSV File from Source to Target Workspace
+    Given the file <File name> is located at <DBFS Source Location> in the source workspace
+    When the transfer API is called using <Source URL> with secret scope <Secret Scope> and key <Secret Key>
+    Then the file should be successfully transferred to <DBFS Target Location> in the target workspace
+    And file type should be <Type>
+    Examples:
+      | File name          | DBFS Source Location    | Type | Source URL                                    | Secret Scope | Secret Key   | DBFS Target Location                   |
+      | Adverse_Events.csv | /FileStore/tables/      | CSV  | https://adb-1059044342754982.2.azuredatabricks.net/ | token        | other_ws_token | /FileStore/tables/Adverse_Events/ |
+
+  Scenario: Validate Bronze Layer Transformations
+    Given the data is in the table `purgo_playground.customer_file_data_bronze`
+    When the column names are converted to snake case
+    Then the table should have columns ae_id, patient_id, treatment_group, adverse_event, severity, start_date, end_date, action_taken
+    And a column data_loaded_at should be added with the current timestamp
+
+  Scenario: Validate Silver Layer Transformations
+    Given the data is in the table `purgo_playground.customer_file_data_silver`
+    When null start_date and end_date are replaced with random dates in 2023 such that start_date < end_date
+    And a surrogate key is created by hashing the combined columns
+    Then the table should have columns start_date, end_date with non-null values
+    And a new column surrogate_key with hashed values
+
+  Scenario: Validate Gold Layer Transformations
+    Given the data is in the table `purgo_playground.customer_file_data_silver`
+    When the distinct patient ID count per severity is calculated
+    Then save the results to table `purgo_playground.customer_file_data_gold`
+    And the table should have columns severity and distinct_patient_count
+
+  Scenario Outline: Error Handling in File Transfer
+    Given the API call to transfer file <File name> from <Source URL> with scope <Secret Scope> and key <Secret Key>
+    When there is a connection failure or interruption
+    Then log the error with message <Error Message>
+    And retry the transfer up to <Retry Limit> times
+    Examples:
+      | File name          | Source URL                                    | Secret Scope | Secret Key   | Error Message                       | Retry Limit |
+      | Adverse_Events.csv | https://adb-1059044342754982.2.azuredatabricks.net/ | token        | other_ws_token | "Connection Error: Transfer failed" | 3           |
+
+  Scenario: Validation of Unity Catalog Schema
+    Given the Unity Catalog schema `purgo_playground` is being used
+    When checking for data model updates
+    Then ensure all table definitions align with the business requirements
+    And update the schema if necessary
+
+  Scenario: Security and Access Compliance
+    Given secret scopes and keys are used for the API
+    When handling the transfer and transformation process
+    Then ensure compliance with the security protocols
+    And confirm data privacy measures are implemented
+
