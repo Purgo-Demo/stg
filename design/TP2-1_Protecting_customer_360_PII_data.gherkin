@@ -1,0 +1,70 @@
+Feature: Encrypt PII Data in customer_360_raw_clone
+
+  As a data engineer
+  I want to encrypt PII columns in the customer_360_raw_clone table
+  So that PII data is protected according to company policies
+
+  Background:
+    Given a Databricks environment
+    And an existing table purgo_playground.customer_360_raw
+    And a non-existing or old table purgo_playground.customer_360_raw_clone dropped
+
+  Scenario: Setup customer_360_raw_clone for encryption
+    Given the table purgo_playground.customer_360_raw
+    When I replicate the table into purgo_playground.customer_360_raw_clone
+    Then purgo_playground.customer_360_raw_clone contains same structure as customer_360_raw
+
+  Scenario Outline: Encrypt PII Data Successfully
+    Given a column "<pii_column>" in purgo_playground.customer_360_raw_clone
+    When I apply "<encryption_algorithm>" encryption
+    Then the column "<pii_column>" should be encrypted
+    And an encryption key saved as encryption_key_<current_datetime>.json in /Volumes/agilisium_playground/purgo_playground/de_dq
+
+    Examples:
+      | pii_column |
+      | name       |
+      | email      |
+      | phone      |
+      | zip        |
+
+  Scenario Outline: Error on Unsupported Encryption Algorithm
+    Given a column "<pii_column>" in purgo_playground.customer_360_raw_clone
+    When I apply an unsupported encryption algorithm "<unsupported_algorithm>"
+    Then I should receive an error message "<error_message>"
+
+    Examples:
+      | pii_column | unsupported_algorithm | error_message                             |
+      | name       | unknown_algo          | "Error: Unsupported encryption algorithm" |
+
+  Scenario: Validate Saving of Encryption Key
+    Given successful encryption of PII data
+    When the encryption key is saved
+    Then the JSON file should be named encryption_key_<current_datetime>.json
+    And saved in the correct location /Volumes/agilisium_playground/purgo_playground/de_dq
+
+  Scenario: Handle Encryption Key Save Error
+    Given the encryption process completed
+    When there is an error saving the encryption key
+    Then an error message "Error: Unable to save encryption key" is displayed
+
+  Scenario: Ensure Data Integrity After Encryption
+    Given encrypted data in purgo_playground.customer_360_raw_clone
+    When I compare the record structure
+    Then all columns except <pii_columns> remain unmodified
+
+  Scenario Outline: Test Permissions and Access Controls
+    Given encrypted data and keys
+    When accessed by "<user_role>"
+    Then "<access_condition>" for both data and keys
+
+    Examples:
+      | user_role          | access_condition              |
+      | administrator      | access_granted                |
+      | unauthorized_user  | access_denied                 |
+
+  Scenario: Verify Encryption and Decryption Processes
+    Given encryption has been applied
+    When I decrypt the encrypted data
+    Then the data must match the original non-encrypted data
+
+
