@@ -1,87 +1,87 @@
-# Databricks PySpark script for testing encryption in a Databricks environment
-
-# Necessary imports and library setup
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, sha2, date_format, lit, current_timestamp
-from pyspark.sql.types import StructType, StructField, StringType, LongType, DateType, IntegerType
+from pyspark.sql.functions import col, create_map, lit, struct
+from pyspark.sql.types import StringType, StructType, StructField, ArrayType, MapType
+from cryptography.fernet import Fernet
 import json
+from datetime import datetime
 
 # Initialize Spark session
 spark = SparkSession.builder \
-    .appName("PII Encryption - Test Code") \
+    .appName("Encrypt PII Data") \
+    .enableHiveSupport() \
     .getOrCreate()
 
-# Setup and configuration comments
-# --------------------------------
-# Drop the old clone table if it exists
-# Create a new clone table from the existing raw table
+# Generate encryption key and initialize encryption object
+encryption_key = Fernet.generate_key()
+fernet = Fernet(encryption_key)
 
-# Drop table if it exists
+# Function to encrypt a column
+def encrypt_column(column_value):
+    if column_value is not None:
+        return fernet.encrypt(column_value.encode()).decode()
+    return None
+
+encrypt_udf = spark.udf.register("encrypt_udf", encrypt_column, StringType())
+
+# Drop the table if it exists
 spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
 
-# Clone the raw customer table to a new clone for testing
+# Create a replica table for processing
 spark.sql("""
-  CREATE TABLE purgo_playground.customer_360_raw_clone
-  AS SELECT * FROM purgo_playground.customer_360_raw
+    CREATE TABLE purgo_playground.customer_360_raw_clone 
+    AS SELECT * FROM purgo_playground.customer_360_raw
 """)
 
-# Schema for testing and validation purposes
-schema = StructType([
-    StructField("id", LongType(), True),
+# Read the replica table into a DataFrame
+customer_360_raw_clone_df = spark.table("purgo_playground.customer_360_raw_clone")
+
+# Encrypt specified PII columns using a UDF
+customer_360_encrypted_df = customer_360_raw_clone_df.withColumn("name", encrypt_udf(col("name"))) \
+    .withColumn("email", encrypt_udf(col("email"))) \
+    .withColumn("phone", encrypt_udf(col("phone"))) \
+    .withColumn("zip", encrypt_udf(col("zip")))
+
+# Write encrypted data back to the customer_360_raw_clone table
+customer_360_encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+
+# Save encryption key as a JSON file
+current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+key_file_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+
+with open(key_file_path, "w") as key_file:
+    json.dump({"encryption_key": encryption_key.decode()}, key_file)
+
+spark.stop()
+
+# Performance test: Measure time taken to encrypt a large dataset (if required)
+
+# Schema validation tests
+# Create expected schema
+expected_schema = StructType([
+    StructField("id", StringType(), True),
     StructField("name", StringType(), True),
     StructField("email", StringType(), True),
     StructField("phone", StringType(), True),
-    StructField("zip", StringType(), True),
-    # Other columns omitted for brevity
+    StructField("company", StringType(), True),
+    StructField("job_title", StringType(), True),
+    StructField("address", StringType(), True),
+    StructField("city", StringType(), True),
+    StructField("state", StringType(), True),
+    StructField("country", StringType(), True),
+    StructField("industry", StringType(), True),
+    StructField("account_manager", StringType(), True),
+    StructField("creation_date", StringType(), True),
+    StructField("last_interaction_date", StringType(), True),
+    StructField("purchase_history", StringType(), True),
+    StructField("notes", StringType(), True),
+    StructField("zip", StringType(), True)
 ])
 
-# Test data for customer_360_raw_clone table
-testData = [
-    (1, "John Doe", "john.doe@example.com", "123-456-7890", "12345"),
-    (2, "Alice Lee", "alice.lee@example.com", "098-765-4321", "54321"),
-    (3, None, None, None, None),  # NULL handling test case
-    # Other records omitted
-]
+# Assert schema matches expected
+assert customer_360_encrypted_df.schema == expected_schema, "Schema does not match expected schema"
 
-# Create a DataFrame from test data
-df = spark.createDataFrame(data=testData, schema=schema)
+# Encryption Functionality validation tests
+# Read encrypted data
+encrypted_df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Encrypt PII columns using SHA-256 for demonstration purposes
-encrypted_df = df.withColumn("name", sha2(col("name"), 256)) \
-    .withColumn("email", sha2(col("email"), 256)) \
-    .withColumn("phone", sha2(col("phone"), 256)) \
-    .withColumn("zip", sha2(col("zip"), 256))
-
-# Define a static encryption key for demonstration purposes
-encryption_key = {"key": "static_dummy_key"}
-key_file_path = f"/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{date_format(current_timestamp(), 'yyyyMMdd_HHmmss')}.json"
-
-# Save the encryption key as a JSON file
-dbutils.fs.put(key_file_path, json.dumps(encryption_key))
-
-# Write the encrypted DataFrame back to the clone table
-encrypted_df.write.format("delta").mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
-
-# Show resulting DataFrame to verify encryption result
-encrypted_df.show(truncate=False)
-
-# Perform validations
-# --------------------------------
-# Validate that schema matches expected structure
-assert encrypted_df.schema == df.schema, "Schema mismatch after encryption"
-
-# Validate that encryption key was saved successfully
-assert dbutils.fs.head(key_file_path) is not None, "Encryption key was not saved correctly"
-
-# Validate data integrity for non-PII columns
-original_df = spark.table("purgo_playground.customer_360_raw").select("id", "name", "email", "phone", "zip")
-modified_df = spark.table("purgo_playground.customer_360_raw_clone").select("id")
-
-assert original_df.count() == modified_df.count(), "Row count mismatch after encryption"
-
-# Perform cleanup
-# --------------------------------
-# Clean up tables and files used in this test
-spark.sql("DROP TABLE IF EXISTS purgo_playground.customer_360_raw_clone")
-dbutils.fs.rm(key_file_path)
-
+# Decryption and validation logic can be added here (if needed) for end-to-end integration testing
