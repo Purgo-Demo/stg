@@ -1,4 +1,5 @@
-from pyspark.sql.functions import col, sha2, concat, lit, current_timestamp
+from pyspark.sql.functions import col, sha2, concat, lit
+from datetime import datetime
 import json
 import os
 
@@ -17,13 +18,14 @@ spark.sql("""
 
 # Define encryption function
 def encrypt_column(df, column_name, key):
+    # Simple hash encryption for demonstration purposes
     return df.withColumn(column_name, sha2(concat(col(column_name), lit(key)), 256))
 
-# Load data from customer_360_raw
+# Load data from customer_360_raw_clone
 customer_raw_df = spark.table("purgo_playground.customer_360_raw_clone")
 
-# Generate a secure encryption key
-encryption_key = "secure_sample_encryption_key"
+# Key for pseudo encryption (to replace with an actual encryption logic)
+encryption_key = "sample_encryption_key"
 
 # Encrypt PII columns
 encrypted_df = customer_raw_df \
@@ -40,16 +42,16 @@ expected_schema = customer_raw_df.schema
 if encrypted_df.schema != expected_schema:
     raise AssertionError("Schema validation failed after encryption.")
 
-# Save encrypted data back to cloned table with Delta format
-encrypted_df.write.format("delta").mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
+# Save encrypted data back to cloned table
+encrypted_df.write.mode("overwrite").saveAsTable("purgo_playground.customer_360_raw_clone")
 
 # ---------------------------------------------------
 # JSON Key Storage
 # Generate encryption key file name and save the key as a JSON
 # ---------------------------------------------------
 
-current_datetime = current_timestamp().cast("string").collect()[0][0]  # Collect single value for filename
-encryption_key_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_datetime}.json"
+current_timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+encryption_key_path = f"/dbfs/Volumes/agilisium_playground/purgo_playground/de_dq/encryption_key_{current_timestamp}.json"
 encryption_key_dict = {"encryption_key": encryption_key}
 
 # Save the encryption key to a JSON file
@@ -71,12 +73,5 @@ with open(encryption_key_path, 'r') as file:
     assert saved_key == encryption_key_dict, "Mismatch between expected and saved encryption keys."
 
 # ---------------------------------------------------
-# Delta Table Optimization and Maintenance
+# End of Script
 # ---------------------------------------------------
-
-# Optimize the table by Z-ordering it on relevant columns
-spark.sql("OPTIMIZE purgo_playground.customer_360_raw_clone ZORDER BY (name, email)")
-
-# Vacuum old versions of the data
-spark.sql("VACUUM purgo_playground.customer_360_raw_clone RETAIN 0 HOURS")
-
