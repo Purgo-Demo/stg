@@ -1,57 +1,48 @@
-Feature: Calculate Inventory at Risk for DNSA Events
+Feature: Real-time Calculation of Inventory at Risk Due to DNSA Events
 
   Background:
-    Given the DNSA event definition as a scenario where dnsa_flag is set to 'yes'
-    And the Inventory at Risk calculation is needed if flag_active in records is 'Y'
-    And the input data is from the purgo_playground.f_inv_movmnt table
+    Given the dataset is loaded from the purgo_playground schema
+    And the f_inv_movmnt table is available for financial and inventory movements
 
-  Scenario Outline: Calculate Inventory at Risk and Percentages
-    Given the f_inv_movmnt record with flag_active '<flag_active>' and financial_qty '<financial_qty>'
-    When the flag_active is 'Y'
-    Then add the financial_qty to the inventory_at_risk total
-    And calculate Percentage of Inventory at Risk as inventory_at_risk divided by <total_inventory> times 100
-    And display the Percentage of Inventory at Risk
+  Scenario: Calculate Inventory at Risk when DNSA flag is active
+    Given flag_active is set to 'Y' for DNSA event
+    When I sum the financial_qty from the f_inv_movmnt table where flag_active is 'Y'
+    Then the Inventory at Risk should be calculated as the total of financial quantities with active DNSA flag
 
-    Examples:
-      | flag_active | financial_qty | total_inventory |
-      | Y           | 100           | 1000            |
-      | Y           | 200           | 2000            |
-      | N           | 300           | 5000            |
+  Scenario: Calculate Percentage of Inventory at Risk
+    Given I have the Inventory at Risk calculated
+    And I have the total inventory from the f_inv_movmnt table as the sum of financial_qty
+    When I calculate the percentage of Inventory at Risk
+    Then the Percentage of Inventory at Risk should be calculated using the formula: (Inventory at Risk / Total Inventory) * 100
+    And the result should be a double representing the percentage
 
-  Scenario: Handle Missing DNSA Flag Data
-    Given that a record in f_inv_movmnt lacks the dnsa_flag
-    When attempting to calculate Inventory at Risk
-    Then log an error with message "Missing DNSA flag in record"
-    And exclude the record from calculations
-
-  Scenario: Handle Flag Activation Inconsistency
-    Given f_inv_movmnt records with differing 'flag_active' values
-    When calculating inventory_at_risk
-    Then process only records where 'flag_active' equals 'Y'
-  
-  Scenario: Define Total Inventory Calculation from Related Tables
-    Given the tables <table1>, <table2> with related inventory fields
-    When merging inventory data
-    Then use the specified fields from each table to accurately compute total inventory
-
-    Examples:
-      | table1                  | table2                  |
-      | d_product               | d_product_hist         |
-      | d_product_clone         | d_product_test_happy   |
-
-  Scenario: Real-time Inventory Calculations
-    Given a requirement for real-time update frequency
-    When a DNSA event scenario is detected
-    Then trigger Spark SQL jobs to recalculate Inventory at Risk
-    And update results in the reporting interface immediately
-
-  Scenario: Error Handling in Spark SQL Calculations
-    Given a failure in fetching key data from f_inv_movmnt
-    When executing the Spark SQL script
-    Then capture a failure message with details
-    And continue processing remaining records
+  Scenario Outline: Data-driven testing for Inventory at Risk calculation
+    Given flag_active is set to <flag_active_value>
+    When I sum the financial_qty where flag_active matches <flag_active_value>
+    Then the Inventory at Risk should be <expected_inventory_at_risk>
     
-  Scenario: Prioritizing Data Source for Overlapping Columns
-    Given overlapping columns in d_product and d_product_clone
-    When selecting primary data source
-    Then prioritize columns from d_product_clone for calculation purposes
+    Examples:
+      | flag_active_value | expected_inventory_at_risk |
+      | Y                 | 500.0                      |
+      | N                 | 0.0                        |
+
+  Scenario Outline: Error Scenarios for unsupported flag values
+    Given I have an unsupported flag_active value of <unsupported_flag>
+    When I attempt to calculate the Inventory at Risk
+    Then an error message "Unsupported flag value" should be generated
+    
+    Examples:
+      | unsupported_flag |
+      | A                |
+      | X                |
+ 
+  Scenario: Validate Data Input Types for Inventory Calculations
+    Given I have loaded the financial_qty as a double from the f_inv_movmnt table
+    When I inspect the data type
+    Then the data type should be double without any conversion errors
+
+  Scenario: Handle Real-time Data Streaming for Inventory Calculations
+    Given I have real-time access to the f_inv_movmnt table
+    When there is a new DNSA event entered with flag_active 'Y'
+    Then the Inventory at Risk should be recalculated immediately
+    And the percentage should reflect the change with no delay
