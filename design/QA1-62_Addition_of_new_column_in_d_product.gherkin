@@ -1,0 +1,70 @@
+Feature: Update d_product table to include 'source_country' column
+
+  Background:
+    Given the purgo_playground schema in Unity Catalog
+    And the d_product, d_product_clone, d_product_vw, and d_product_vw_clone tables
+
+  # Happy Path Scenario
+  Scenario: Add 'source_country' column with default 'NL' value
+    Given the d_product_clone table exists
+    When I alter the table d_product_clone to add 'source_country' column with default value 'NL'
+    Then the column 'source_country' should exist in the d_product_clone table
+    And the default value of 'source_country' should be 'NL'
+  
+  # View Update Scenario
+  Scenario: Update dependent view to include 'source_country'
+    Given the d_product_vw_clone view exists
+    When I alter the view d_product_vw_clone to include 'source_country' as 'NL'
+    Then the view d_product_vw_clone should reflect the 'source_country' column
+    And the value of 'source_country' should be 'NL'
+
+  # Error Handling Scenarios
+  Scenario: Error when table does not exist
+    Given the d_product_clone table does not exist
+    When I attempt to alter the table to add 'source_country' column
+    Then an error message "Table does not exist" should be emitted
+
+  Scenario: Error when view does not exist
+    Given the d_product_vw_clone view does not exist
+    When I attempt to alter the view to include 'source_country'
+    Then an error message "View does not exist" should be emitted
+
+  # Rollback Scenario
+  Scenario: Rollback changes due to an error
+    Given the column 'source_country' is added
+    And an error occurs in downstream systems
+    When I rollback the addition of 'source_country'
+    Then the d_product_clone table should not have 'source_country'
+    And the d_product_vw_clone view should not reflect 'source_country'
+
+  # Validation Scenarios
+  Scenario Outline: Validate 'source_country' column and view integration
+    Given the d_product_clone table with the new column 'source_country'
+    And a product entry with <prod_id>
+    When I query the table for 'source_country'
+    Then the output should be 'NL'
+    And the data should integrate correctly in d_product_vw_clone view
+
+    Examples:
+      | prod_id |
+      | "P01"   |
+      | "P02"   |
+      | "P03"   |
+
+
+### Technical Details
+
+- **Data Values and Formats**: 
+  - New column 'source_country' is a string with default value 'NL'.
+  
+- **Validation Rules**:
+  - Ensure that the 'source_country' column is correctly added with the hardcoded value 'NL'.
+  - Check that the column appears in the views that depend on the product table.
+
+- **Error Conditions and Messages**:
+  - If attempting to modify a non-existing table or view, appropriate errors should be raised.
+
+- **Acceptance Criteria**:
+  - Successfully add 'source_country' to the `d_product_clone` and `d_product_vw_clone`.
+  - Ensure there are no errors when the column is integrated into existing dependent views.
+  - Include necessary validations and rollback strategies in place for error scenarios.
