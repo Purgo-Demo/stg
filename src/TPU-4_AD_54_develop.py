@@ -1,7 +1,6 @@
 from pyspark.sql.types import *
-from pyspark.sql.functions import col, lit, when, countDistinct
+from pyspark.sql.functions import col, lit, udf, when, count
 from pyspark.sql.window import Window
-from pyspark.sql.functions import udf
 from datetime import datetime
 
 # Define schema for the sales file
@@ -39,11 +38,10 @@ sales_df = sales_df.withColumn("validation_errors",
 )
 
 # Check for duplicate product_id using window function and add validation message
-duplicate_product_ids = sales_df.groupBy("Product_id").count().filter("count > 1").select("Product_id")
-
-sales_df = sales_df.join(duplicate_product_ids, "Product_id", "left_anti") \
+windowSpec = Window.partitionBy("Product_id")
+sales_df = sales_df.withColumn("duplicate_check", count("Product_id").over(windowSpec)) \
     .withColumn("validation_errors",
-    when(col("Product_id").isNull(), lit("product_id should not be duplicate")).otherwise(col("validation_errors"))
+    when(col("duplicate_check") > 1, lit("product_id should not be duplicate")).otherwise(col("validation_errors"))
 )
 
 # UDF to check for valid date format
@@ -67,7 +65,7 @@ exceptions_df = sales_df.filter(col("validation_errors").isNotNull()) \
 
 # Save exceptions to exception table
 exceptions_df.write.format("delta") \
-    .mode("overwrite") \
+    .mode("append") \
     .option("mergeSchema", "true") \
     .saveAsTable("purgo_playground.sales_exceptions")
 
