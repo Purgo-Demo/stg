@@ -1,58 +1,57 @@
-Feature: File Quality Check for Sales Data
+Feature: File Quality Check and Load to Unity Catalog Sales Table
 
   Background:
-    Given the sales file is located at {{dbfs:/FileStore/tables/sales_20240611.csv}}
-    And the target table is purgo_playground.sales
-    And the exception table is purgo_playground.sales_exceptions
+    Given the sales file is located at "dbfs:/FileStore/tables/sales_20240611.csv"
+    And the target table is "purgo_playground.sales"
+    And the exception table is "purgo_playground.sales_exceptions"
 
-  Scenario: Successful Loading of Valid Data
-    Given the sales file is read from the location
-    When the file is checked for the expected number of columns
-    And "Country_cd" is not null for all records
-    And "qty_sold" contains only numeric values
-    And all "product_id" fields are unique
-    And "Date" is in yyyy-mm-dd format for all records
-    Then the valid records are loaded into the purgo_playground.sales table
-    And the schema is merged with existing schema
+  Scenario Outline: Validate and Load Sales Data
+    Given the sales file is loaded into a processing environment
+    When the quality checks are performed
+    Then the valid records are loaded into "purgo_playground.sales"
+    And the error records are loaded into "purgo_playground.sales_exceptions"
 
-  Scenario: Handling Exception Records
-    Given the sales file is read from the location
-    When records contain null "Country_cd"
-    Or records contain non-numeric "qty_sold"
-    Or duplicate "product_id" exists
-    Or "Date" is not in yyyy-mm-dd format
-    Then the exception records are moved to purgo_playground.sales_exceptions table
-    And details of validation errors are populated in the "validation_errors" column
-    And these exception records are excluded from loading into the sales table
+  Examples:
+    | country_cd | product_id | qty_sold | sales_date   | validation_errors                            |
+    | NULL       | 101        | 123      | 2023-01-15   | Missing country_cd                           |
+    | US         | 101        | abc      | 2023-01-15   | qty_sold should be numeric                   |
+    | US         | 101        | 123      | 01-15-2023   | sales_date should be in 'yyyy-mm-dd' format  |
+    | US         | 102        | 123      | 2023-01-15   |                                               |
 
-  Scenario Outline: File Quality Check for Different Error Scenarios
-    Given the sales file is read from the location
-    When the file is checked for the expected number of columns
-    And "<Column>" contains invalid data
-    Then the record is moved to purgo_playground.sales_exceptions table
-    And details of validation errors are populated in the "validation_errors" column
+  Scenario: Happy Path - Valid File Structure
+    Given the file has the expected number of rows and columns
+    And country_cd is not NULL for all records
+    And qty_sold contains only numeric values
+    And product_id contains unique values
+    And sales_date is in 'yyyy-mm-dd' format
+    When the file is validated
+    Then no validation errors are found
+    And all records are loaded into "purgo_playground.sales"
 
-    Examples: 
-      | Column      | Error Description                               |
-      | Country_cd  | Null value detection in Country_cd              |
-      | qty_sold    | Non-numeric value found in qty_sold             |
-      | product_id  | Duplicate product_id detected                   |
-      | Date        | Date format is not yyyy-mm-dd                   |
+  Scenario: Error Handling - Missing Values
+    Given country_cd is missing in some records
+    When the file is validated
+    Then the records with missing country_cd are identified
+    And are moved to "purgo_playground.sales_exceptions"
+    And appropriate validation error messages are assigned
 
-  Scenario: Validation Rule and Error Conditions
-    Given the sales file is read from the location
-    When "Country_cd" is found to be null
-    Then the error message is "Country_cd cannot be null" is logged
-    And the affected record is moved to purgo_playground.sales_exceptions
+  Scenario: Error Handling - Numeric Validation
+    Given qty_sold contains non-numeric values
+    When the file is validated
+    Then the records with non-numeric qty_sold are identified
+    And are moved to "purgo_playground.sales_exceptions"
+    And appropriate validation error messages are assigned
 
-    Given "qty_sold" contains non-numeric values
-    Then error message "qty_sold must be numeric" is logged
-    And the affected record is moved to purgo_playground.sales_exceptions
+  Scenario: Error Handling - Duplicate Product IDs
+    Given product_id contains duplicate values
+    When the file is validated
+    Then the records with duplicate product_id are identified
+    And are moved to "purgo_playground.sales_exceptions"
+    And appropriate validation error messages are assigned
 
-    Given duplicates are detected in "product_id"
-    Then error message "product_id must be unique" is logged
-    And the affected record is moved to purgo_playground.sales_exceptions
-
-    Given "Date" is not in yyyy-mm-dd format
-    Then error message "Invalid date format for Date" is logged
-    And the affected record is moved to purgo_playground.sales_exceptions
+  Scenario: Error Handling - Date Format Validation
+    Given sales_date is not in 'yyyy-mm-dd' format
+    When the file is validated
+    Then the records with incorrect sales_date format are identified
+    And are moved to "purgo_playground.sales_exceptions"
+    And appropriate validation error messages are assigned
