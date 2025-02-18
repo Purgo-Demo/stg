@@ -1,0 +1,46 @@
+Feature: Data Quality Check for d_product Table
+
+  Background:
+    Given the table name is "purgo_playground.d_product"
+    And the primary key of the table is "prod_id"
+
+  Scenario: Validate non-null item_nbr and sellable_qty
+    Given a connection to the database
+    When the SQL query is executed to count null 'item_nbr' and 'sellable_qty'
+    Then the count of records with null 'item_nbr' should be returned
+    And a sample of 5 records with null 'item_nbr' should be displayed
+    And the count of records with null 'sellable_qty' should be returned
+    And a sample of 5 records with null 'sellable_qty' should be displayed
+
+  Scenario: Validate prod_exp_dt format is yyyymmdd
+    Given a connection to the database
+    When the SQL query is executed to find incorrect 'prod_exp_dt' format
+    Then the count of records with 'prod_exp_dt' not in yyyymmdd format should be returned
+    And a sample of 5 records with 'prod_exp_dt' not in yyyymmdd format should be displayed
+
+  Scenario Outline: Handle error scenarios for data validation
+    Given a connection to the database
+    When the SQL query "<query>" is executed
+    Then if a validation error occurs
+    And an appropriate error message "<error_message>" should be logged
+    Examples:
+      | query                                  | error_message                                    |
+      | SELECT * FROM purgo_playground.d_product WHERE prod_exp_dt !~ '^[0-9]{8}$' | "Invalid format for 'prod_exp_dt'" |
+      | SELECT * FROM purgo_playground.d_product WHERE item_nbr IS NULL            | "Missing 'item_nbr' values detected" |
+      | SELECT * FROM purgo_playground.d_product WHERE sellable_qty IS NULL         | "Missing 'sellable_qty' values detected" |
+
+  Scenario Outline: Verify happy path scenarios for valid data
+    Given a connection to the database
+    When the SQL queries are executed for non-null <column> and correct 'prod_exp_dt' format
+    Then the data should meet all specified quality checks
+    And no validation errors should be encountered
+    Examples:
+      | column         |
+      | item_nbr       |
+      | sellable_qty   |
+
+
+Notes:
+- "prod_exp_dt" validation assumes no separators and expects an 8-digit format.
+- Specific error messages are included for different types of validation errors.
+- Each scenario covers different aspects of the specified data quality checks.
