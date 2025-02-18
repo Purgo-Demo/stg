@@ -1,0 +1,58 @@
+Feature: Calculate Days on Hand (DOH) Usage for Inventory and Product Plants
+
+  Background:
+    Given the definition and structure of `f_inv_movmnt` and `f_sales` datasets
+    And the business rules or thresholds for interpreting DOH KPI
+    And a detailed explanation of Unity Catalog Schema
+    And the required granularity and aggregation levels for DOH usage reporting
+
+  Scenario Outline: Calculate DOH Usage for a Specific Product and Plant
+    Given the inventory movements in dataset <f_inv_movmnt> for product <productId> at plant <plantId>
+    And the sales data in dataset <f_sales> for product <productId> at plant <plantId>
+    When I calculate the average inventory for the quarter
+    And I calculate the average daily sales for the quarter
+    Then I calculate the DOH using the formula (Average Inventory / Average Daily Sales) * 365
+    And I calculate the DOH usage KPI
+
+  Examples:
+    | f_inv_movmnt | f_sales | productId | plantId |
+    | ...          | ...     | 101       | A1      |
+    | ...          | ...     | 102       | B2      |
+
+  Scenario: Successful DOH Calculation
+    Given valid datasets for `f_inv_movmnt` and `f_sales`
+    When I perform calculations based on the DOH formula
+    Then I should get a positive DOH value
+    And the DOH usage KPI should be within the defined business thresholds
+
+  Scenario: Error Handling for Missing Inventory Data
+    Given `f_inv_movmnt` dataset is missing for product <productId>
+    When I attempt to calculate DOH
+    Then an error message "Inventory data not available for product <productId>" is returned
+
+  Scenario: Error Handling for Missing Sales Data
+    Given `f_sales` dataset is missing for product <productId>
+    When I attempt to calculate DOH
+    Then an error message "Sales data not available for product <productId>" is returned
+
+  Scenario Outline: Validate Data Integrity Before Calculation
+    Given incomplete data in `f_inv_movmnt` for product <productId> at plant <plantId>
+    When I attempt to calculate DOH
+    Then an error message "Invalid data in inventory movement dataset for product <productId> at plant <plantId>" is returned
+
+  Scenario Outline: Validate Calculation Results Within Business Thresholds
+    Given the calculated DOH value for product <productId> at plant <plantId>
+    When the DOH KPI is computed
+    Then I compare the KPI against business thresholds
+    And return a status that indicates whether it is good, acceptable, or poor
+
+  Examples:
+    | productId | plantId | thresholdStatus |
+    | 101       | A1      | Good            |
+    | 102       | B2      | Poor            |
+
+  Scenario: Ensure Data Security and Access Controls
+    Given Unity Catalog Schema details
+    When I query the data
+    Then access should only be allowed for users with necessary permissions
+
