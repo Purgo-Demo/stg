@@ -1,0 +1,47 @@
+Feature: Update product view to include hfm_entity based on source system code
+
+  In order to enhance the product view with relevant data for supply chain analysis
+  As a Data Engineer
+  I want to update the d_product_vw to include the hfm_entity column with specific logic based on src_sys_cd
+  
+  Background:
+    Given the Unity Catalog Schema is purgo_playground
+
+  Scenario Outline: Populate hfm_entity for src_sys_cd as 'orafin'
+    Given d_product is queried with stock_type as <stock_type>
+    And edp_lkup is queried with lkup_key_01 as <lkup_key_01>
+    When the src_sys_cd is 'orafin'
+    And edu_lkup.lkup_key_01 equals d_product.stock_type
+    Then the hfm_entity in d_product_vw should be set to lkkup_val_01
+    Examples:
+      | stock_type | lkup_key_01 |
+      | STK_TYPE_1 | STK_TYPE_1  |
+      | STK_TYPE_2 | STK_TYPE_2  |
+  
+  Scenario: Leave hfm_entity unchanged for non-'orafin' src_sys_cd
+    Given the src_sys_cd is not 'orafin'
+    When joining with edp_lkup and d_product tables
+    Then the hfm_entity value in d_product_vw should not change
+    
+  Scenario: Handle missing join keys in edp_lkup
+    Given d_product has stock_type as 'UNKNOWN_TYPE'
+    And edp_lkup does not have corresponding lkup_key_01
+    When joining edp_lkup and d_product
+    Then log an error message "Missing join key in edp_lkup for stock_type 'UNKNOWN_TYPE'"
+
+  Scenario Outline: Validate correct population of hfm_entity
+    Given edp_lkup includes lkup_key_01 as <lkup_key_01>
+    And d_product includes stock_type as <stock_type>
+    When the src_sys_cd is 'orafin'
+    Then ensure hfm_entity is set to <lkkup_val_01>
+    Examples:
+      | lkup_key_01 | stock_type  | lkkup_val_01 |
+      | STK_TYPE_1  | STK_TYPE_1  | HFM_ENTITY_1 |
+      | STK_TYPE_2  | STK_TYPE_2  | HFM_ENTITY_2 |
+
+  Scenario: Validate hfm_entity remains unchanged for unexpected src_sys_cd
+    Given d_product includes src_sys_cd as 'unknown_src'
+    When joining with edp_lkup and d_product tables
+    Then the hfm_entity value should remain unchanged
+    And log a warning message "Unsupported src_sys_cd: 'unknown_src'"
+
