@@ -1,0 +1,59 @@
+Feature: Real-time Calculation of Inventory at Risk Due to DNSA Events
+  In order to manage manufacturing efficiently and minimize losses
+  As a manufacturing analyst
+  I want to calculate inventory at risk and its percentage reliably and precisely when a DNSA event occurs.
+
+  Background:
+    Given the data is accessed from Spark SQL
+    And the key table used is purgo_playground.f_inv_movmnt
+    And the DNSA flag source is predefined and available
+
+  Scenario: Calculate Inventory at Risk on DNSA Event
+    Given dnsa_flag is set to 'yes'
+    And flag_active in purgo_playground.f_inv_movmnt is 'Y'
+    When querying the financial_qty column
+    Then the sum of financial_qty should be calculated to determine the inventory at risk
+    And the result should be stored in inventory_at_risk
+
+  Scenario: Calculate Percentage of Inventory at Risk
+    Given inventory_at_risk has been calculated
+    And total inventory is obtained from the sum of financial_qty column in purgo_playground.f_inv_movmnt
+    When calculating the percentage of inventory at risk
+    Then Percentage of Inventory at Risk = (inventory_at_risk / total_inventory) * 100
+    And the result should be formatted to two decimal places
+
+  Scenario Outline: Calculate Inventory at Risk with Different DNSA Flags
+    Given the dnsa_flag is <dnsa_flag>
+    And flag_active in purgo_playground.f_inv_movmnt is 'Y'
+    When querying the financial_qty column
+    Then the sum of financial_qty should be calculated as inventory_at_risk
+
+    Examples:
+      | dnsa_flag |
+      | yes       |
+      | no        |
+
+  Scenario: Error Handling When DNSA Flag is Missing
+    Given dnsa_flag is null or missing
+    When attempting to calculate inventory at risk
+    Then an error message should be displayed
+    And the message should read "DNSA flag is required and cannot be null."
+
+  Scenario: Error Handling When No Active Flags are Found
+    Given dnsa_flag is set to 'yes'
+    And no flag_active in purgo_playground.f_inv_movmnt is 'Y'
+    When attempting to calculate inventory at risk
+    Then an error message should be displayed
+    And the message should read "No active flags found in inventory movement data."
+
+  Scenario: Define Total Inventory for Calculation
+    Given data is read from purgo_playground.f_inv_movmnt
+    And financial_qty and net_qty are added to define total inventory
+    When calculating inventory percentage risk
+    Then ensure total_inventory is correctly defined and validated
+
+  Scenario: Resolve Multiple Active Flags and DNSA Calculations
+    Given multiple flag_active are present across tables in the schema
+    When resolving which active flag to use
+    Then establish priority or most recent 'Y' flag in purgo_playground.f_inv_movmnt
+    And ensure consistent inventory at risk calculations
