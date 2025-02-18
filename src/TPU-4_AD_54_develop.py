@@ -1,4 +1,5 @@
-from pyspark.sql.types import *
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, BooleanType, DecimalType, DateType
 from pyspark.sql.functions import col, lit, udf, when, count
 from pyspark.sql.window import Window
 from datetime import datetime
@@ -71,7 +72,7 @@ exceptions_df.write.format("delta") \
 
 # Filter out valid records to sales table
 valid_sales_df = sales_df.filter(col("validation_errors").isNull()) \
-    .select("Country_cd", "Product_id", col("qty_sold").cast("decimal(10,0)").alias("qty_sold"), col("sales_date").cast("date").alias("sales_date"))
+    .select("Country_cd", "Product_id", col("qty_sold").cast(DecimalType(10,0)).alias("qty_sold"), col("sales_date").cast(DateType()).alias("sales_date"))
 
 # Save valid records to sales table
 valid_sales_df.write.format("delta") \
