@@ -1,65 +1,65 @@
-# Loading necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, lit, isnan, expr
-from pyspark.sql.types import StructType, StructField, StringType, DecimalType, DateType
+from pyspark.sql.functions import col, when, lit, date_format
+import json
 
-# Initialize Spark session
-spark = SparkSession.builder.appName("GenerateTestData").getOrCreate()
+# Initialize Spark Session
+spark = SparkSession.builder \
+    .appName("Databricks Test Data Generation") \
+    .getOrCreate()
 
-# Define schema for sales table
-sales_schema = StructType([
-    StructField("Country_cd", StringType(), True),
-    StructField("Product_id", StringType(), True),
-    StructField("qty_sold", DecimalType(10, 0), True),
-    StructField("sales_date", DateType(), True)
-])
-
-# Sample data generation
-data = [
-    # Happy path
-    ("US", "101", "123", "2024-03-21"),  # Valid Record
-    ("CA", "102", "50", "2024-03-22"),   # Valid Record
-    # Edge cases
-    ("", "103", "0", "2024-03-23"),      # Empty country code, qty = 0
-    ("MX", "104", "9999999999", "2024-03-24"),  # Max edge qty
-    ("JP", None, "100", "2024-03-25"),   # Null product_id
-    # Error cases
-    (None, "105", "svv", "2024-03-26"),  # Non-numeric qty_sold
-    ("IN", "105", "-123", "2024-03-27"), # Negative qty_sold
-    ("IN", "105", "123", "03-27-2024"),  # Invalid date format
-    # Special characters and multi-byte characters
-    ("DE", "106", "10", "2024-03-28"),   # Valid with multi-byte
-    ("FR", "107@#$%", "200", "2024-03-29"), # Special characters in Product_id
+# Define sample data
+sales_data = [
+    {"Country_cd": "USA", "Product_id": "P123", "qty_sold": "10", "sales_date": "2023-06-11"},
+    {"Country_cd": "CAN", "Product_id": "P124", "qty_sold": "NotNum", "sales_date": "2023-06-12"},
+    {"Country_cd": "GER", "Product_id": "P123", "qty_sold": "5", "sales_date": "2023-06-13"},
+    {"Country_cd": "FRA", "Product_id": "P126", "qty_sold": "12", "sales_date": "2023-06-14"},
+    {"Country_cd": None, "Product_id": "P127", "qty_sold": "15", "sales_date": "2023-06-15"},
+    {"Country_cd": "USA", "Product_id": "P128", "qty_sold": "20", "sales_date": "2023-06-16"},
+    {"Country_cd": "UK", "Product_id": "P129", "qty_sold": "NaN", "sales_date": "2023-06-17"},
+    {"Country_cd": "AUS", "Product_id": "P130", "qty_sold": "25", "sales_date": "2023-06-18"},
+    {"Country_cd": "AUS", "Product_id": "P130", "qty_sold": "30", "sales_date": "2023-06-19"},
+    {"Country_cd": "ITA", "Product_id": "P131", "qty_sold": "35", "sales_date": "202306-20"},
+    # More data following the same pattern...
 ]
 
 # Create DataFrame from sample data
-df = spark.createDataFrame(data, schema=sales_schema)
+df_sales = spark.createDataFrame(sales_data)
 
-# Display test data
-df.show(truncate=False)
+# Define rules to identify invalid records
+df_with_errors = df_sales.withColumn("validation_errors", lit(None).cast("string"))
 
-# Define quality checks
-exception_conditions = [
-    (col("Country_cd").isNull() | (col("Country_cd") == ""), "Missing country_cd"),
-    (col("qty_sold").cast(DecimalType(10, 0)).isNull() | isnan(col("qty_sold")), "qty_sold should be numeric"),
-    (col("qty_sold").cast(DecimalType(10, 0)) < 0, "qty_sold cannot be negative"),
-    (~col("sales_date").rlike("^\d{4}-\d{2}-\d{2}$"), "sales_date should be in 'yyyy-mm-dd' format")
-]
+# Validate that country_cd is not null
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(col("Country_cd").isNull(), lit("Country_cd is null"))
+    .otherwise(col("validation_errors"))
+)
 
-# Create exception DataFrame
-exceptions_df = df
-for condition, error_msg in exception_conditions:
-    exceptions_df = exceptions_df.withColumn("validation_errors", when(condition, error_msg).otherwise(None))
+# Validate that product_id is unique
+duplicates = [row.Product_id for row in df_sales.groupBy("Product_id").count().filter("count > 1").select("Product_id").collect()]
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(col("Product_id").isin(duplicates), lit("Duplicate Product_id"))
+    .otherwise(col("validation_errors"))
+)
 
-# Filter exceptions
-exceptions_df = exceptions_df.filter(col("validation_errors").isNotNull())
+# Validate that qty_sold is numeric
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(~col("qty_sold").cast("decimal(10,0)").isNotNull(), lit("qty_sold is not numeric"))
+    .otherwise(col("validation_errors"))
+)
 
-# Write exceptions to sales_exceptions table with mergeSchema=True
-exceptions_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales_exceptions")
+# Validate that sales_date is in yyyy-mm-dd format
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(~date_format(col("sales_date"), "yyyy-MM-dd").isNotNull(), lit("sales_date format is incorrect"))
+    .otherwise(col("validation_errors"))
+)
 
-# Filter valid records
-valid_df = df.subtract(exceptions_df.drop("validation_errors"))
+# Separate valid and error records
+df_valid_records = df_with_errors.filter(col("validation_errors").isNull()).drop("validation_errors")
+df_error_records = df_with_errors.filter(col("validation_errors").isNotNull())
 
-# Write valid records to sales table with mergeSchema=True
-valid_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales")
+# Write valid records to the sales table with mergeSchema=true
+df_valid_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales")
+
+# Write error records to the sales_exceptions table with mergeSchema=true
+df_error_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales_exceptions")
 
