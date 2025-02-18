@@ -1,65 +1,67 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, lit, date_format
-import json
+from pyspark.sql.functions import col, when, isnull, count, lit, expr
+from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, TimestampType
+import pyspark.sql.functions as F
 
-# Initialize Spark Session
+# Initialize Spark session
 spark = SparkSession.builder \
-    .appName("Databricks Test Data Generation") \
+    .appName("Data Quality File Check") \
     .getOrCreate()
 
-# Define sample data
-sales_data = [
-    {"Country_cd": "USA", "Product_id": "P123", "qty_sold": "10", "sales_date": "2023-06-11"},
-    {"Country_cd": "CAN", "Product_id": "P124", "qty_sold": "NotNum", "sales_date": "2023-06-12"},
-    {"Country_cd": "GER", "Product_id": "P123", "qty_sold": "5", "sales_date": "2023-06-13"},
-    {"Country_cd": "FRA", "Product_id": "P126", "qty_sold": "12", "sales_date": "2023-06-14"},
-    {"Country_cd": None, "Product_id": "P127", "qty_sold": "15", "sales_date": "2023-06-15"},
-    {"Country_cd": "USA", "Product_id": "P128", "qty_sold": "20", "sales_date": "2023-06-16"},
-    {"Country_cd": "UK", "Product_id": "P129", "qty_sold": "NaN", "sales_date": "2023-06-17"},
-    {"Country_cd": "AUS", "Product_id": "P130", "qty_sold": "25", "sales_date": "2023-06-18"},
-    {"Country_cd": "AUS", "Product_id": "P130", "qty_sold": "30", "sales_date": "2023-06-19"},
-    {"Country_cd": "ITA", "Product_id": "P131", "qty_sold": "35", "sales_date": "202306-20"},
-    # More data following the same pattern...
-]
+# Define schema for the sales data
+schema = StructType([
+    StructField("country_cd", StringType(), True),
+    StructField("qty_sold", DoubleType(), True),
+    StructField("product_id", StringType(), True),
+    StructField("Date", StringType(), True)  # Using StringType to perform custom validation
+])
 
-# Create DataFrame from sample data
-df_sales = spark.createDataFrame(sales_data)
+# Load sales data from CSV file in DBFS
+sales_df = spark.read.format("csv") \
+    .option("header", "true") \
+    .schema(schema) \
+    .load("dbfs:/FileStore/tables/sales_20240611.csv")
 
-# Define rules to identify invalid records
-df_with_errors = df_sales.withColumn("validation_errors", lit(None).cast("string"))
+# Perform quality checks and identify errors
+error_df = sales_df.withColumn("error_message", lit(None).cast(StringType()))
+error_df = error_df.withColumn("error_message", when(isnull(col("country_cd")), "Error: country_cd is null").otherwise(col("error_message")))
+error_df = error_df.withColumn("error_message", when(~col("qty_sold").cast(DoubleType()).isNotNull(), "Error: qty_sold is not numeric").otherwise(col("error_message")))
 
-# Validate that country_cd is not null
-df_with_errors = df_with_errors.withColumn("validation_errors",
-    when(col("Country_cd").isNull(), lit("Country_cd is null"))
-    .otherwise(col("validation_errors"))
-)
+# Check for duplicate product_ids
+product_id_counts = sales_df.groupBy("product_id").count().filter("count > 1")
+error_df = error_df.join(product_id_counts, on="product_id", how="left")
+error_df = error_df.withColumn("error_message", when(col("count").isNotNull(), "Error: Duplicate product_id").otherwise(col("error_message")))
 
-# Validate that product_id is unique
-duplicates = [row.Product_id for row in df_sales.groupBy("Product_id").count().filter("count > 1").select("Product_id").collect()]
-df_with_errors = df_with_errors.withColumn("validation_errors",
-    when(col("Product_id").isin(duplicates), lit("Duplicate Product_id"))
-    .otherwise(col("validation_errors"))
-)
+# Validate Date format
+error_df = error_df.withColumn("error_message", 
+                               when(~col("Date").rlike("^\d{4}-\d{2}-\d{2}$"), "Error: Date format is invalid").otherwise(col("error_message")))
 
-# Validate that qty_sold is numeric
-df_with_errors = df_with_errors.withColumn("validation_errors",
-    when(~col("qty_sold").cast("decimal(10,0)").isNotNull(), lit("qty_sold is not numeric"))
-    .otherwise(col("validation_errors"))
-)
+# Select records with any errors
+exception_records = error_df.filter(col("error_message").isNotNull())
 
-# Validate that sales_date is in yyyy-mm-dd format
-df_with_errors = df_with_errors.withColumn("validation_errors",
-    when(~date_format(col("sales_date"), "yyyy-MM-dd").isNotNull(), lit("sales_date format is incorrect"))
-    .otherwise(col("validation_errors"))
-)
+# Drop exception records from the original data
+valid_records = sales_df.join(exception_records.select("product_id"), on="product_id", how="left_anti")
 
-# Separate valid and error records
-df_valid_records = df_with_errors.filter(col("validation_errors").isNull()).drop("validation_errors")
-df_error_records = df_with_errors.filter(col("validation_errors").isNotNull())
+# Define schema for exception records
+exception_schema = StructType([
+    StructField("country_cd", StringType(), True),
+    StructField("qty_sold", DoubleType(), True),
+    StructField("product_id", StringType(), True),
+    StructField("Date", StringType(), True),
+    StructField("error_message", StringType(), True)
+])
 
-# Write valid records to the sales table with mergeSchema=true
-df_valid_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales")
+# Write exception records to the exception table
+exception_records.write \
+    .option("mergeSchema", "true") \
+    .format("delta") \
+    .mode("append") \
+    .saveAsTable("sales_exception_table")
 
-# Write error records to the sales_exceptions table with mergeSchema=true
-df_error_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales_exceptions")
+# Write valid records to sales table in Unity Catalog
+valid_records.write \
+    .option("mergeSchema", "true") \
+    .format("delta") \
+    .mode("overwrite") \
+    .saveAsTable("sales_table")
 
