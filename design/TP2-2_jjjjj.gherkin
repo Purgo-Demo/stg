@@ -1,0 +1,54 @@
+Feature: Unity Catalog Management System
+
+  Background:
+    Given the Unity Catalog system is deployed
+    And the user has administrative access
+
+  Scenario: Add a new dataset to Unity Catalog
+    Given a new dataset named "Sales2023.csv" is available in the source location
+    When the admin user selects "Add Dataset" in the Unity Catalog
+    And enters the dataset name as "Sales2023.csv"
+    And specifies data format as "csv"
+    And sets the schema as "SalesDataSchema"
+    Then the dataset should be added to the Unity Catalog
+    And a confirmation message "Dataset 'Sales2023.csv' added successfully" should be displayed
+
+  Scenario: Error when adding a dataset with missing schema
+    Given a new dataset named "Revenue2023.csv" is available in the source location
+    When the admin user selects "Add Dataset" in the Unity Catalog
+    And enters the dataset name as "Revenue2023.csv"
+    And specifies data format as "csv"
+    And does not set a schema
+    Then an error message "Schema must be specified for dataset 'Revenue2023.csv'." should be displayed
+
+  Scenario: Search for a dataset in Unity Catalog
+    Given the dataset "Customer2023.csv" is present in the Unity Catalog
+    When the user searches for "Customer2023"
+    Then the dataset "Customer2023.csv" should appear in the search results
+
+  Scenario Outline: Validate dataset format during upload
+    Given a new dataset named "<DatasetName>" is available in the source location
+    When the admin user selects "Add Dataset" in the Unity Catalog
+    And enters the dataset name as "<DatasetName>"
+    And specifies data format as "<Format>"
+    Then the system should validate the dataset format
+    And an error message "<ErrorMessage>" should be displayed
+
+    Examples:
+      | DatasetName   | Format  | ErrorMessage                                                  |
+      | Inventory2023 | txt     | "Unsupported data format 'txt' for dataset 'Inventory2023'."  |
+      | Products2023  | xml     | "Unsupported data format 'xml' for dataset 'Products2023'."   |
+
+  Scenario: Update dataset metadata
+    Given the dataset "Employee2023.csv" exists in the Unity Catalog
+    When the admin user selects "Update Metadata" for "Employee2023.csv"
+    And updates the description to "2023 Employee Data"
+    Then the metadata for "Employee2023.csv" should be updated successfully
+    And a confirmation message "Metadata updated for 'Employee2023.csv'." should be displayed
+
+  Scenario: Delete a dataset from Unity Catalog
+    Given the dataset "OldSalesData.csv" exists in the Unity Catalog
+    When the admin user selects "Delete" for "OldSalesData.csv"
+    And confirms the deletion
+    Then the dataset "OldSalesData.csv" should be removed from the Unity Catalog
+    And a confirmation message "Dataset 'OldSalesData.csv' deleted successfully" should be displayed
