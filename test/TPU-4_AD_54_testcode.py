@@ -1,74 +1,42 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, to_date, row_number
-from pyspark.sql.window import Window
-import pyspark.sql.types as T
+from pyspark.sql.functions import col, when, isnan, rlike
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType
 
-# Initialize Spark Session
-spark = SparkSession.builder \
-    .appName("Data Quality and Load") \
-    .enableHiveSupport() \
-    .getOrCreate()
+# Start Spark session
+spark = SparkSession.builder.appName("SalesDataValidation").getOrCreate()
 
-# Load the sales file from DBFS with mergeSchema option
-sales_df = spark.read \
-    .option("header", "true") \
-    .option("mergeSchema", "true") \
-    .csv("dbfs:/FileStore/tables/sales_20240611.csv")
-
-# Define schema for sales table
-sales_schema = T.StructType([
-    T.StructField("Country_cd", T.StringType(), True),
-    T.StructField("Product_id", T.StringType(), True),
-    T.StructField("qty_sold", T.DecimalType(10, 0), True),
-    T.StructField("sales_date", T.DateType(), True)
+# Define schema for the sales data
+sales_schema = StructType([
+    StructField("Country_cd", StringType(), True),
+    StructField("Product_id", StringType(), True),
+    StructField("qty_sold", DecimalType(10,0), True),
+    StructField("sales_date", StringType(), True)
 ])
 
-# Define schema for exceptions table
-exceptions_schema = T.StructType([
-    T.StructField("Country_cd", T.StringType(), True),
-    T.StructField("Product_id", T.StringType(), True),
-    T.StructField("qty_sold", T.StringType(), True),
-    T.StructField("sales_date", T.StringType(), True),
-    T.StructField("validation_errors", T.StringType(), True)
-])
+# Load the sales file from DBFS
+sales_df = spark.read.option("header", "true").schema(sales_schema).csv("dbfs:/FileStore/tables/sales_20240611.csv")
 
-# Cast DataFrame to match schema types and perform initial transformations
-sales_cast_df = sales_df \
-    .withColumn("qty_sold", col("qty_sold").cast(T.DecimalType(10, 0))) \
-    .withColumn("sales_date", to_date(col("sales_date"), "yyyy-MM-dd"))
+# Add validation columns for error detection
+validations_df = sales_df.withColumn("validation_errors", when(col("Country_cd").isNull() | (col("Country_cd") == ""), "Missing country_cd")
+                                                  .when(isnan(col("qty_sold")) | col("qty_sold").cast(DecimalType(10,0)).isNull(), "qty_sold should be numeric")
+                                                  .when(~col("sales_date").rlike("^\d{4}-\d{2}-\d{2}$"), "sales_date should be in yyyy-mm-dd format"))
 
-# Window function to check for duplicate Product_id
-window_spec = Window.partitionBy("Product_id").orderBy("Product_id")
+# Detect duplicate product IDs
+duplicate_products_df = sales_df.groupBy("Product_id").count().filter(col("count") > 1).select("Product_id")
+duplicates_df = sales_df.join(duplicate_products_df, on="Product_id", how="inner").withColumn("validation_errors", when(col("Product_id").isNotNull(), "Duplicate Product_id"))
 
-# Check for null, non-numeric, duplicate and invalid date format conditions
-exceptions_df = sales_cast_df \
-    .withColumn("row_num", row_number().over(window_spec)) \
-    .filter(
-        (col("Country_cd").isNull() | col("Country_cd") == "") |
-        (col("qty_sold").isNull() | ~col("qty_sold").cast("string").rlike("^[0-9]+$")) |
-        (col("sales_date").isNull()) |
-        (col("row_num") > 1)
-    ) \
-    .withColumn("validation_errors", 
-        lit("country_cd should not be null").when(col("Country_cd").isNull() | col("Country_cd") == "", "country_cd should not be null")
-        .when(~col("qty_sold").cast("string").rlike("^[0-9]+$"), "qty_sold should be numeric")
-        .when(col("row_num") > 1, "product_id should not be duplicate")
-        .when(col("sales_date").isNull(), "Date should be in yyyy-mm-dd format")
-    ) \
-    .select("Country_cd", "Product_id", col("qty_sold").cast("string"), col("sales_date").cast("string"), "validation_errors")
+# Union validations and duplicates to get exception records
+errors_df = validations_df.union(duplicates_df).filter(col("validation_errors").isNotNull())
 
-# Write exceptions to sales_exceptions table
-exceptions_df.write \
-    .option("mergeSchema", "true") \
-    .mode("overwrite") \
-    .saveAsTable("purgo_playground.sales_exceptions")
+# Write exceptions to sales_exceptions table, handling schema dynamically
+errors_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales_exceptions")
 
-# Filter out invalid records for final load
-valid_sales_df = sales_cast_df.join(exceptions_df, ["Country_cd", "Product_id", "qty_sold", "sales_date"], "left_anti")
+# Filter valid records by subtracting errors
+valid_sales_df = sales_df.subtract(errors_df.drop("validation_errors"))
 
-# Load valid records to sales table
-valid_sales_df.write \
-    .option("mergeSchema", "true") \
-    .mode("overwrite") \
-    .saveAsTable("purgo_playground.sales")
+# Write valid sales records to the sales table, handling schema dynamically
+valid_sales_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales")
+
+# Stop Spark session
+spark.stop()
