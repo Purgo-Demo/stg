@@ -1,0 +1,62 @@
+Feature: Build Combined Agreement Table
+
+  As a system, I need to combine agreement and deal tables with customer information
+  to create a combined_agreement table for effective management and compliance tracking
+  in the life sciences domain.
+
+  Background:
+    Given a database schema named "purgo_playground"
+    And a table "agreement" with columns "agree_no", "agree_desc", "agree_type", 
+    "agree_type_desc", "agree_from_dt", "agree_end_dt", "source_country", "crt_dt", 
+    "source_customer_id", "master_agreement_type", "material_number"
+    And a table "deal" with columns "deal", "agree_type", "material_number", 
+    "master_agreement_type", "source_customer_id"
+    And a table "customer" with columns "source_customer_id", "address1", "state", 
+    "city", "postal_code"
+    And an empty table "combined_agreement" with columns "agree_no", "agree_desc", 
+    "agree_type", "material_number", "master_agreement_type", "source_customer_id", 
+    "address1", "state", "city", "postal_code"
+
+  Scenario: Successfully build the combined_agreement table
+    Given customer data exists with source_customer_id, address1, state, city, postal_code
+    And agreement data exists with columns specified in the "agreement" table
+    And deal data exists with columns specified in the "deal" table
+    When I join the "agreement" table with the "customer" table on "source_customer_id"
+    And join the "deal" table with the "customer" table on "source_customer_id"
+    Then the "combined_agreement" table should be populated with:
+      | agree_no | agree_desc | agree_type | material_number | master_agreement_type | source_customer_id | address1 | state | city | postal_code |
+
+  Scenario Outline: Handle missing data in agreement or deal tables
+    Given a missing agreement or deal entry for "<source_customer_id>"
+    When trying to join the tables
+    Then display an error message "Missing data for source_customer_id <source_customer_id>"
+    And do not insert a record into the "combined_agreement" table
+
+    Examples:
+      | source_customer_id |
+      | CUST001            |
+      | CUST002            |
+
+  Scenario: Validate field formats and data integrity
+    Given a new record in the "agreement" table with "material_number" as non-string format
+    When joining "agreement", "deal", and "customer" tables
+    Then display an error message "Invalid data format for material_number"
+    And skip the record for "combined_agreement" table insertion
+
+  Scenario: Handle duplicate records in agreement or deal tables
+    Given duplicate records exist in the "agreement" or "deal" tables for "<source_customer_id>"
+    When attempting to join tables
+    Then display an error message "Duplicate records found for source_customer_id <source_customer_id>"
+    And aggregate unique records only for "combined_agreement"
+
+    Examples:
+      | source_customer_id |
+      | CUST003            |
+
+  Scenario: Data driven testing for combined table insertion
+    Given a set of agreements, deals, and customers
+    When processing the following data:
+    | agree_no | source_customer_id | deal |
+    | AG001    | CUST004            | D001 |
+    | AG002    | CUST005            | D002 |
+    Then verify the "combined_agreement" table is updated correctly for each combination
