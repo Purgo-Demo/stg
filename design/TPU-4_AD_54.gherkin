@@ -1,0 +1,58 @@
+Feature: File Quality Check for Sales Data
+
+  Background:
+    Given the sales file is located at {{dbfs:/FileStore/tables/sales_20240611.csv}}
+    And the target table is purgo_playground.sales
+    And the exception table is purgo_playground.sales_exceptions
+
+  Scenario: Successful Loading of Valid Data
+    Given the sales file is read from the location
+    When the file is checked for the expected number of columns
+    And "Country_cd" is not null for all records
+    And "qty_sold" contains only numeric values
+    And all "product_id" fields are unique
+    And "Date" is in yyyy-mm-dd format for all records
+    Then the valid records are loaded into the purgo_playground.sales table
+    And the schema is merged with existing schema
+
+  Scenario: Handling Exception Records
+    Given the sales file is read from the location
+    When records contain null "Country_cd"
+    Or records contain non-numeric "qty_sold"
+    Or duplicate "product_id" exists
+    Or "Date" is not in yyyy-mm-dd format
+    Then the exception records are moved to purgo_playground.sales_exceptions table
+    And details of validation errors are populated in the "validation_errors" column
+    And these exception records are excluded from loading into the sales table
+
+  Scenario Outline: File Quality Check for Different Error Scenarios
+    Given the sales file is read from the location
+    When the file is checked for the expected number of columns
+    And "<Column>" contains invalid data
+    Then the record is moved to purgo_playground.sales_exceptions table
+    And details of validation errors are populated in the "validation_errors" column
+
+    Examples: 
+      | Column      | Error Description                               |
+      | Country_cd  | Null value detection in Country_cd              |
+      | qty_sold    | Non-numeric value found in qty_sold             |
+      | product_id  | Duplicate product_id detected                   |
+      | Date        | Date format is not yyyy-mm-dd                   |
+
+  Scenario: Validation Rule and Error Conditions
+    Given the sales file is read from the location
+    When "Country_cd" is found to be null
+    Then the error message is "Country_cd cannot be null" is logged
+    And the affected record is moved to purgo_playground.sales_exceptions
+
+    Given "qty_sold" contains non-numeric values
+    Then error message "qty_sold must be numeric" is logged
+    And the affected record is moved to purgo_playground.sales_exceptions
+
+    Given duplicates are detected in "product_id"
+    Then error message "product_id must be unique" is logged
+    And the affected record is moved to purgo_playground.sales_exceptions
+
+    Given "Date" is not in yyyy-mm-dd format
+    Then error message "Invalid date format for Date" is logged
+    And the affected record is moved to purgo_playground.sales_exceptions
