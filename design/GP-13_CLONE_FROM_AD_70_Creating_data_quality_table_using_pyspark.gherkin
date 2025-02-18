@@ -1,0 +1,45 @@
+Feature: Data Quality Check for purgo_playground.d_product_revenue Table
+
+  Background:
+    Given I have access to purgo_playground.d_product_revenue table
+    And the DQ table purgo_playground.dq_check_table exists with columns check_no, check_name, and dq_result
+
+  Scenario: Column Name Validation
+    Given the expected column names are ['product_id', 'product_name', 'product_type', 'revenue', 'country', 'customer_id', 'purchased_date', 'invoice_date', 'invoice_number', 'is_returned', 'customer_satisfaction_score', 'product_details']
+    When I compare actual column names in purgo_playground.d_product_revenue with expected column names
+    Then log "Pass" in dq_result column with check_name "Column Name Validation" if all names match
+    Else log "Fail" in dq_result column with check_name "Column Name Validation"
+
+  Scenario: Revenue Value Check
+    Given the revenue column should not contain negative values
+    When I check all values in revenue column of purgo_playground.d_product_revenue
+    Then log "Pass" in dq_result column with check_name "Revenue Value Check" if no negative values are found
+    Else log "Fail" in dq_result column with check_name "Revenue Value Check"
+
+  Scenario: Decimal Precision Check
+    Given the revenue column should have values with exactly two decimal places
+    When I verify all values in revenue column of purgo_playground.d_product_revenue
+    Then log "Pass" in dq_result column with check_name "Decimal Precision Check" if all have two decimal places
+    Else log "Fail" in dq_result column with check_name "Decimal Precision Check"
+
+  Scenario Outline: Comprehensive Data Quality Validation
+    Given the data quality check "<Check Name>" on purgo_playground.d_product_revenue table
+    When I execute the validation logic for "<Check Name>"
+    Then record the check result as "<Result>" in purgo_playground.dq_check_table with check_no "<Check No>"
+
+    Examples:
+      | Check No | Check Name                  | Result |
+      | 1        | Column Name Validation      | Pass   |
+      | 2        | Revenue Value Check         | Pass   |
+      | 3        | Decimal Precision Check     | Pass   |
+      | 4        | Column Name Validation      | Fail   |
+      | 5        | Revenue Value Check         | Fail   |
+      | 6        | Decimal Precision Check     | Fail   |
+
+  Scenario: Error Conditions and Messages Logging
+    Given I encounter a failure in any DQ check
+    Then an appropriate error message should be logged in the dq_result column
+    And the check should be recorded in the purgo_playground.dq_check_table with either "Pass" or "Fail"
+
+
+This Gherkin specification covers the feature of validating data quality in the `purgo_playground.d_product_revenue` table. It includes scenarios for checking column names, ensuring non-negative revenue values, and verifying the precision of the revenue decimal places. Both happy path and error scenarios are considered, and example data is provided for multiple test cases.
