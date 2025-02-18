@@ -1,7 +1,7 @@
-from pyspark.sql import SparkSession
 from pyspark.sql.types import *
-from pyspark.sql.functions import col, lit, udf, when, countDistinct
+from pyspark.sql.functions import col, lit, when, countDistinct
 from pyspark.sql.window import Window
+from pyspark.sql.functions import udf
 from datetime import datetime
 
 # Define schema for the sales file
@@ -20,7 +20,7 @@ sales_df = spark.read.format("csv") \
 
 # Check for null country_cd and add validation message
 sales_df = sales_df.withColumn("validation_errors",
-    when(col("Country_cd").isNull(), lit("country_cd should not be null")).otherwise(lit(None))
+    when(col("Country_cd").isNull(), lit("country_cd should not be null"))
 )
 
 # UDF to check if a value is numeric
@@ -35,16 +35,15 @@ is_numeric_udf = udf(lambda x: is_numeric(x), BooleanType())
 
 # Check for non-numeric qty_sold and add validation message
 sales_df = sales_df.withColumn("validation_errors",
-    when(~is_numeric_udf(col("qty_sold")), 
-         lit("qty_sold should be numeric")).otherwise(col("validation_errors"))
+    when(~is_numeric_udf(col("qty_sold")), lit("qty_sold should be numeric")).otherwise(col("validation_errors"))
 )
 
-# Check for duplicate product_id using window function
-window_spec = Window.partitionBy("Product_id")
-sales_df = sales_df.withColumn("duplicate_check", countDistinct(col("Product_id")).over(window_spec)) \
+# Check for duplicate product_id using window function and add validation message
+duplicate_product_ids = sales_df.groupBy("Product_id").count().filter("count > 1").select("Product_id")
+
+sales_df = sales_df.join(duplicate_product_ids, "Product_id", "left_anti") \
     .withColumn("validation_errors",
-    when(col("duplicate_check") > 1, 
-         lit("product_id should not be duplicate")).otherwise(col("validation_errors"))
+    when(col("Product_id").isNull(), lit("product_id should not be duplicate")).otherwise(col("validation_errors"))
 )
 
 # UDF to check for valid date format
@@ -59,8 +58,7 @@ valid_date_format_udf = udf(lambda x: valid_date_format(x), BooleanType())
 
 # Check for incorrect date format and add validation message
 sales_df = sales_df.withColumn("validation_errors",
-    when(~valid_date_format_udf(col("sales_date")), 
-         lit("Date should be in yyyy-mm-dd format")).otherwise(col("validation_errors"))
+    when(~valid_date_format_udf(col("sales_date")), lit("Date should be in yyyy-mm-dd format")).otherwise(col("validation_errors"))
 )
 
 # Filter out records with errors to exception table
@@ -69,7 +67,7 @@ exceptions_df = sales_df.filter(col("validation_errors").isNotNull()) \
 
 # Save exceptions to exception table
 exceptions_df.write.format("delta") \
-    .mode("append") \
+    .mode("overwrite") \
     .option("mergeSchema", "true") \
     .saveAsTable("purgo_playground.sales_exceptions")
 
