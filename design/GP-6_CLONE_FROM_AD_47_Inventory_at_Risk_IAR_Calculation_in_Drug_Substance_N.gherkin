@@ -1,0 +1,57 @@
+Feature: Calculate Inventory at Risk for DNSA Events
+
+  Background:
+    Given the DNSA event definition as a scenario where dnsa_flag is set to 'yes'
+    And the Inventory at Risk calculation is needed if flag_active in records is 'Y'
+    And the input data is from the purgo_playground.f_inv_movmnt table
+
+  Scenario Outline: Calculate Inventory at Risk and Percentages
+    Given the f_inv_movmnt record with flag_active '<flag_active>' and financial_qty '<financial_qty>'
+    When the flag_active is 'Y'
+    Then add the financial_qty to the inventory_at_risk total
+    And calculate Percentage of Inventory at Risk as inventory_at_risk divided by <total_inventory> times 100
+    And display the Percentage of Inventory at Risk
+
+    Examples:
+      | flag_active | financial_qty | total_inventory |
+      | Y           | 100           | 1000            |
+      | Y           | 200           | 2000            |
+      | N           | 300           | 5000            |
+
+  Scenario: Handle Missing DNSA Flag Data
+    Given that a record in f_inv_movmnt lacks the dnsa_flag
+    When attempting to calculate Inventory at Risk
+    Then log an error with message "Missing DNSA flag in record"
+    And exclude the record from calculations
+
+  Scenario: Handle Flag Activation Inconsistency
+    Given f_inv_movmnt records with differing 'flag_active' values
+    When calculating inventory_at_risk
+    Then process only records where 'flag_active' equals 'Y'
+  
+  Scenario: Define Total Inventory Calculation from Related Tables
+    Given the tables <table1>, <table2> with related inventory fields
+    When merging inventory data
+    Then use the specified fields from each table to accurately compute total inventory
+
+    Examples:
+      | table1                  | table2                  |
+      | d_product               | d_product_hist         |
+      | d_product_clone         | d_product_test_happy   |
+
+  Scenario: Real-time Inventory Calculations
+    Given a requirement for real-time update frequency
+    When a DNSA event scenario is detected
+    Then trigger Spark SQL jobs to recalculate Inventory at Risk
+    And update results in the reporting interface immediately
+
+  Scenario: Error Handling in Spark SQL Calculations
+    Given a failure in fetching key data from f_inv_movmnt
+    When executing the Spark SQL script
+    Then capture a failure message with details
+    And continue processing remaining records
+    
+  Scenario: Prioritizing Data Source for Overlapping Columns
+    Given overlapping columns in d_product and d_product_clone
+    When selecting primary data source
+    Then prioritize columns from d_product_clone for calculation purposes
