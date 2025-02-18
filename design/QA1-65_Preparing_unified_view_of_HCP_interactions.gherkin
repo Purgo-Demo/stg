@@ -1,0 +1,82 @@
+Feature: Unified View of HCP Interactions
+
+  Background:
+    Given the Unity Catalog Schema "purgo_playground" is set up
+    And the tables "customer_360_raw" and "customer_hcp_interaction" are available
+    And the mapping details are provided in "hcp_view_mapping.xlsx"
+
+  Scenario Outline: Create HCP Interaction View
+    Given a Databricks environment with SQL access
+    When I execute SQL code to drop and create the HCP interaction view
+    Then the "hcp_interaction_view" should conform to specifications with correct joins
+
+    Examples:
+      | Data Source Table        | Join Condition                                                                             |
+      | customer_360_raw         | Inner join on "phone" if channel is "In-person", otherwise on "email" |
+
+  Scenario: Verify Correct Fields in HCP Interaction View
+    Given the "hcp_interaction_view" is created
+    When I query the view for the first row
+    Then the fields "name", "email", "phone", "interaction_date", "topic", "duration_mins", "engagement_score", "is_follow_up", "follow_up_date" should be present
+
+  Scenario: Validate Data Types and Formats
+    Given the "hcp_interaction_view" contains data
+    When I check the data type of each field
+    Then "name" should be string
+    And "email" should be string
+    And "phone" should be string
+    And "interaction_date" should be date
+    And "duration_mins" should be string
+    And "engagement_score" should be bigint
+    And "is_follow_up" should be int
+    And "follow_up_date" should be date
+
+  Scenario: Validate Engagement Score for Follow-Up Logic
+    Given the "hcp_interaction_view" has records with low engagement
+    When I evaluate "is_follow_up" for each record
+    Then "is_follow_up" should be 1 if "engagement_score" is less than 3
+    And "follow_up_date" should be 30 days after "interaction_date" if "is_follow_up" is 1
+
+  Scenario Outline: Data Discrepancies Between Tables
+    Given discrepancies exist between "customer_360_raw" and "customer_hcp_interaction"
+    When I aggregate data into the view
+    Then the view should prioritize data from <PrimaryDataSource>
+
+    Examples:
+      | PrimaryDataSource         |
+      | customer_360_raw          |
+
+  Scenario: Refresh View Frequency
+    Given data changes frequently
+    When there are updates to "customer_360_raw" or "customer_hcp_interaction"
+    Then the view should be refreshed daily to ensure accuracy for sales meetings
+
+  Scenario: Error Handling for Missing Joins
+    Given a join condition is unmet due to missing data
+    When executing the view creation
+    Then an error message "Join condition not met, please verify data integrity" should be logged
+
+
+
+-- Databricks SQL code to drop and create the "hcp_interaction_view",
+-- adhering to the provided mapping and join conditions
+DROP VIEW IF EXISTS purgo_playground.hcp_interaction_view;
+
+CREATE VIEW purgo_playground.hcp_interaction_view AS
+SELECT 
+  c.name,
+  c.email,
+  c.phone,
+  h.interaction_date,
+  h.topic,
+  h.duration_mins,
+  h.engagement_score,
+  CASE WHEN h.engagement_score < 3 THEN 1 ELSE 0 END AS is_follow_up,
+  CASE WHEN h.engagement_score < 3 THEN date_add(h.interaction_date, 30) ELSE NULL END AS follow_up_date
+FROM
+  purgo_playground.customer_360_raw c
+INNER JOIN 
+  purgo_playground.customer_hcp_interaction h
+ON 
+  (h.channel = 'In-person' AND c.phone = h.phone) OR (h.channel != 'In-person' AND c.email = h.email);
+
