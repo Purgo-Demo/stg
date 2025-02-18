@@ -1,73 +1,64 @@
--- Creating test data tables for f_inv_movmnt and f_sales using Databricks SQL
+-- Test Data Generation for Databricks SQL
 
--- Schema for f_inv_movmnt
-CREATE OR REPLACE TABLE f_inv_movmnt (
+-- Create the `f_inv_movmnt` table schema
+CREATE TABLE IF NOT EXISTS f_inv_movmnt (
   productId STRING,
   plantId STRING,
   movementDate TIMESTAMP,
-  inventoryLevel BIGINT
+  inventory BIGINT,
+  comments STRING
 );
 
--- Schema for f_sales
-CREATE OR REPLACE TABLE f_sales (
+-- Insert test data into `f_inv_movmnt`
+-- Happy path and edge cases
+INSERT INTO f_inv_movmnt VALUES
+('101', 'A1', '2024-03-01T00:00:00.000+0000', 1500, 'Initial stock'),
+('101', 'A1', '2024-03-30T00:00:00.000+0000', 1300, 'Sold some products'),
+('102', 'B2', '2024-03-15T00:00:00.000+0000', 0, 'Out of stock'), -- Edge case: Inventory zero
+('103', 'C3', '2024-04-01T00:00:00.000+0000', 2000, NULL), -- NULL comment handling
+('104', 'D4', '2024-03-01T00:00:00.000+0000', 2500, 'Restock with special characters !@#$%^&*()'),
+('105', 'E5', '2024-03-10T00:00:00.000+0000', 700, 'Update ©®∆ƒ'); -- Special Unicode characters
+
+-- Create the `f_sales` table schema
+CREATE TABLE IF NOT EXISTS f_sales (
   productId STRING,
   plantId STRING,
-  salesDate TIMESTAMP,
-  salesVolume BIGINT
+  saleDate TIMESTAMP,
+  salesQuantity BIGINT,
+  comments STRING
 );
 
--- Inserting test data for happy path, edge cases, error cases, and NULL scenarios
-
--- Happy path test data: Valid inventory and sales data
-INSERT INTO f_inv_movmnt VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', 500),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', 600);
-
+-- Insert test data into `f_sales`
+-- Happy path and edge cases
 INSERT INTO f_sales VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', 50),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', 30);
+('101', 'A1', '2024-03-05T00:00:00.000+0000', 300, 'First week sales'),
+('101', 'A1', '2024-03-21T00:00:00.000+0000', 400, 'Mid-March sales'),
+('102', 'B2', '2024-03-10T00:00:00.000+0000', -50, 'Returned items'), -- Error case: Negative sales
+('103', 'C3', '2024-03-25T00:00:00.000+0000', 600, NULL), -- NULL comment handling
+('104', 'D4', '2024-03-15T00:00:00.000+0000', 800, 'Peak sales with special characters !@#$%^&*()'),
+('105', 'E5', '2024-03-30T00:00:00.000+0000', 0, 'End of month sales check'); -- Boundary case: Sales zero
 
--- Edge case: Minimum and maximum inventory and sales data
-INSERT INTO f_inv_movmnt VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', 0),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', 9223372036854775807); -- Max BIGINT
+-- Error cases for missing data scenarios
+-- Create empty tables to simulate missing data
+CREATE TABLE IF NOT EXISTS f_inv_movmnt_missing (
+  productId STRING,
+  plantId STRING,
+  movementDate TIMESTAMP,
+  inventory BIGINT,
+  comments STRING
+);
 
-INSERT INTO f_sales VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', 1),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', 9223372036854775807); -- Max BIGINT
+CREATE TABLE IF NOT EXISTS f_sales_missing (
+  productId STRING,
+  plantId STRING,
+  saleDate TIMESTAMP,
+  salesQuantity BIGINT,
+  comments STRING
+);
 
--- Error case: Out-of-range negative inventory and sales
-INSERT INTO f_inv_movmnt VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', -100),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', -200);
+-- No insertions into these tables to simulate missing data scenarios
 
-INSERT INTO f_sales VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', -10),
-('102', 'B2', '2024-01-01T00:00:00.000+0000', -20);
+-- Add comments explaining test scenarios in SQL script
+-- This script is designed to validate DOH calculations with various scenarios, including: 
+-- Happy path calculations, inventory/sales zero or negative, missing data, NULL handling, special chars, and Unicode.
 
--- NULL handling: Inventory and sales with NULL values
-INSERT INTO f_inv_movmnt VALUES
-('101', 'A1', '2024-01-01T00:00:00.000+0000', NULL);
-
-INSERT INTO f_sales VALUES
-('102', 'B2', '2024-01-01T00:00:00.000+0000', NULL);
-
--- Special characters and multi-byte characters in product and plant IDs
-INSERT INTO f_inv_movmnt VALUES
-('产品101', '工厂A1', '2024-01-01T00:00:00.000+0000', 400);
-
-INSERT INTO f_sales VALUES
-('产品101', '工厂A1', '2024-01-01T00:00:00.000+0000', 40);
-
--- Additional test records for diverse scenarios
-INSERT INTO f_inv_movmnt VALUES
-('103', 'C3', '2024-03-01T00:00:00.000+0000', 800),
-('104', 'D4', '2024-03-02T00:00:00.000+0000', 300);
-
-INSERT INTO f_sales VALUES
-('103', 'C3', '2024-03-01T00:00:00.000+0000', 80),
-('104', 'D4', '2024-03-02T00:00:00.000+0000', 30);
-
--- Ensure data security by restricting access to these tables
-GRANT SELECT ON f_inv_movmnt TO someUserRole;
-GRANT SELECT ON f_sales TO someUserRole;
