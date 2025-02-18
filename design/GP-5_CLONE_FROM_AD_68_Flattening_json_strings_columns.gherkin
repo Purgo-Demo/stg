@@ -1,0 +1,45 @@
+Feature: Extraction of Fields from JSON String in product_details Column
+
+  Background:
+    Given the table purgo_playground.d_product_revenue exists
+    And the table has a column named product_details of type string containing JSON
+
+  Scenario: Extracting fields from the JSON string
+    Given the requirement to extract specific fields from the product_details JSON string
+    When selecting from the d_product_revenue table
+    Then extract the fields: batch_number, expiration_date, manufacturing_site, regulatory_approval, and price
+
+  Scenario Outline: Validate the extraction of each field from the JSON string
+    Given a JSON string <product_details> in product_details column
+    When extracting the JSON string fields 
+    Then the extracted batch_number should be <batch_number> 
+    And the extracted expiration_date should be <expiration_date>
+    And the extracted manufacturing_site should be <manufacturing_site>
+    And the extracted regulatory_approval should be <regulatory_approval>
+    And the extracted price should be <price>
+    Examples: 
+      | product_details                                                                                                                                         | batch_number       | expiration_date | manufacturing_site | regulatory_approval | price   |
+      | {"batch_number": "BATCH2024-5678", "expiration_date": "2025-12-31", "manufacturing_site": "Site A", "regulatory_approval": "Approved", "price": 250.75} | BATCH2024-5678     | 2025-12-31      | Site A             | Approved           | 250.75  |
+
+  Scenario: Handle missing or null JSON fields
+    Given a row in the d_product_revenue table with a null or malformed JSON in product_details column
+    When executing the query
+    Then an error message "Invalid JSON format" should be returned for malformed JSON
+    And the columns for batch_number, expiration_date, manufacturing_site, regulatory_approval, and price should have null values if JSON is null
+
+  Scenario: Error-free execution
+    Given valid JSON data in the product_details column
+    When the query is executed
+    Then the execution should be error-free
+    And the query should extract and display all the required fields correctly
+
+  # Expected Databricks SQL Query
+  # 
+  # SELECT
+  #   CAST(JSON_VALUE(product_details, '$.batch_number') AS STRING) AS batch_number,
+  #   CAST(JSON_VALUE(product_details, '$.expiration_date') AS DATE) AS expiration_date,
+  #   CAST(JSON_VALUE(product_details, '$.manufacturing_site') AS STRING) AS manufacturing_site,
+  #   CAST(JSON_VALUE(product_details, '$.regulatory_approval') AS STRING) AS regulatory_approval,
+  #   CAST(JSON_VALUE(product_details, '$.price') AS DOUBLE) AS price
+  # FROM
+  #   purgo_playground.d_product_revenue;
