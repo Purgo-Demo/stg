@@ -1,59 +1,46 @@
-Feature: Data Quality Check for d_product Table
+Feature: Data Quality Check on d_product Table
 
   Background:
-    Given the purgo_playground schema is available
-    And the d_product table is accessed
+    Given a table "d_product" in the schema "purgo_playground"
+    And the primary key for the table is "prod_id"
+    And the columns of interest are "item_nbr", "sellable_qty", and "prod_exp_dt"
 
-  Scenario: Happy Path - Non-null Validation for item_nbr and sellable_qty
-    Given the d_product table is being validated
-    When checking if 'item_nbr' and 'sellable_qty' are not null
-    Then the SQL should return a count of records where 'item_nbr' is null
-    And display 5 sample records with null 'item_nbr'
-    Then the SQL should return a count of records where 'sellable_qty' is null
-    And display 5 sample records with null 'sellable_qty'
+  Scenario Outline: Validate 'item_nbr' is not null
+    Given the table "d_product" is accessible
+    When querying the records where "item_nbr" is null
+    Then the count of such records should be retrieved
+    And 5 sample records should be displayed
 
-  Scenario: Happy Path - Date Format Validation for prod_exp_dt
-    Given the d_product table is being validated
-    When checking the 'prod_exp_dt' format
-    Then the SQL should return a count of records where 'prod_exp_dt' is not in yyyymmdd format
-    And display 5 sample records with incorrect 'prod_exp_dt' format
+  Scenario Outline: Validate 'sellable_qty' is not null
+    Given the table "d_product" is accessible
+    When querying the records where "sellable_qty" is null
+    Then the count of such records should be retrieved
+    And 5 sample records should be displayed
 
-  Scenario Outline: Error Scenario - Handle Missing Data
-    Given the d_product table is being validated
-    When checking for '<column>' null values
-    Then the validation rule must ensure '<column>' is not null
-    And if '<column>' is null, log an error: "Error: <column> contains null values in d_product table."
+  Scenario Outline: Validate 'prod_exp_dt' format is YYYYMMDD
+    Given the table "d_product" is accessible
+    When querying the records where "prod_exp_dt" does not match the format YYYYMMDD
+    Then the count of such records should be retrieved
+    And 5 sample records should be displayed
 
-    Examples:
-      | column       |
-      | item_nbr     |
-      | sellable_qty |
+  Examples: Data Quality Checks
+    | Test Condition                          | SQL Query Example                                                  |
+    | "item_nbr" is null                      | SELECT COUNT(*) FROM purgo_playground.d_product WHERE item_nbr IS NULL; |
+    | Display 5 records where "item_nbr" is null | SELECT * FROM purgo_playground.d_product WHERE item_nbr IS NULL LIMIT 5; |
+    | "sellable_qty" is null                  | SELECT COUNT(*) FROM purgo_playground.d_product WHERE sellable_qty IS NULL; |
+    | Display 5 records where "sellable_qty" is null | SELECT * FROM purgo_playground.d_product WHERE sellable_qty IS NULL LIMIT 5; |
+    | "prod_exp_dt" does not match YYYYMMDD   | SELECT COUNT(*) FROM purgo_playground.d_product WHERE LENGTH(prod_exp_dt) != 8; |
+    | Display 5 records with invalid "prod_exp_dt" | SELECT * FROM purgo_playground.d_product WHERE LENGTH(prod_exp_dt) != 8 LIMIT 5; |
 
-  Scenario Outline: Error Scenario - Invalid Date Format
-    Given the d_product table is being validated
-    When checking for '<format>' of 'prod_exp_dt'
-    Then the validation rule must ensure 'prod_exp_dt' is in '<format>'
-    And if 'prod_exp_dt' is not in '<format>', log an error: "Error: prod_exp_dt is not in <format> in d_product table."
+  Scenario: Error Condition Handling
+    Given the SQL queries are executed in a compliant system
+    When an error occurs due to an invalid column name
+    Then an error message "Invalid column name in query" should be presented
 
-    Examples:
-      | format   |
-      | yyyymmdd |
+  Scenario: Error Condition for Connection Issue
+    Given the connectivity to the database is established
+    When the connection fails during query execution
+    Then an error message "Database connection error" should be presented
 
-  Scenario: Reporting and Storage of Results
-    Given data quality checks have been performed
-    Then results should be stored in purgo_playground.dq_reports table
-    And reports must include mandatory fields check and date consistency check
-    And any detected issues must be flagged for review by Business Analyst
 
-  Scenario: Define and Assign Roles
-    Given data quality checks may detect issues
-    When issues are detected
-    Then assign the role for addressing issues to Business Analyst
-    And define criteria for issue criticality
-
-  Scenario: Prepare Environment Prerequisites
-    Given SQL queries are to be executed
-    When preparing environment
-    Then ensure purgo_playground schema is operational
-    And check for performance requirements
-    And confirm any dependencies are addressed before execution
+This specification outlines the feature of performing data quality checks on the `d_product` table. It includes scenarios for validating null checks on critical columns and ensuring date format correctness, as well as error handling scenarios.
