@@ -1,43 +1,34 @@
--- Databricks SQL code to drop and create the "hcp_interaction_view",
--- ensuring correct joins based on the provided specifications
+-- SQL View Creation for HCP Unified Interaction
 
-/* Drop the existing view if it exists to ensure we start fresh */
-DROP VIEW IF EXISTS purgo_playground.hcp_interaction_view;
+-- Drop existing view if it exists
+DROP VIEW IF EXISTS purgo_playground.hcp_unified_interaction_view;
 
-CREATE VIEW purgo_playground.hcp_interaction_view AS
+-- Create a new view for unified HCP interactions
+CREATE VIEW purgo_playground.hcp_unified_interaction_view AS
 SELECT 
-  c.name,
-  c.email,
-  c.phone,
-  h.interaction_date,
-  h.topic,
-  h.duration_mins,
-  h.engagement_score,
-  CASE 
-    WHEN h.engagement_score < 3 THEN 1 
-    ELSE 0 
-  END AS is_follow_up,
-  CASE 
-    WHEN h.engagement_score < 3 THEN DATE_ADD(h.interaction_date, 30) 
-    ELSE NULL 
-  END AS follow_up_date
-FROM
-  -- using customer_360_raw as the main source of customer details
-  purgo_playground.customer_360_raw c
+    hcp360.name,
+    hcp360.email,
+    hcp360.phone,
+    interaction.interaction_date,
+    interaction.topic,
+    interaction.duration_mins,
+    interaction.engagement_score,
+    -- Calculate is_follow_up based on engagement_score
+    CASE WHEN interaction.engagement_score < 3 THEN 1 ELSE 0 END AS is_follow_up,
+    -- Calculate follow_up_date only if is_follow_up is TRUE
+    CASE WHEN interaction.engagement_score < 3 THEN DATE_ADD(interaction.interaction_date, 30) END AS follow_up_date
+FROM 
+    purgo_playground.customer_360_raw AS hcp360
 INNER JOIN 
-  -- using customer_hcp_interaction to track all HCP interactions
-  purgo_playground.customer_hcp_interaction h
-ON 
-  -- Join logic: 
-  -- "In-person" interactions join on phone
-  -- Else, join on email
-  (h.channel = 'In-person' AND c.phone = h.phone) OR 
-  (h.channel != 'In-person' AND c.email = h.email);
+    purgo_playground.customer_hcp_interaction AS interaction
+    ON (
+        CASE 
+            -- Join based on phone for In-person channel
+            WHEN interaction.channel = 'In-person' THEN hcp360.phone = interaction.phone
+            -- Join based on email for other channels
+            ELSE hcp360.email = interaction.email
+        END
+    );
 
-/* 
-  Note: 
-  - This view aggregates HCP interactions with customer details.
-  - Follow-up logic applied where engagement score is less than 3.
-  - The interaction data is aligned with the correct customer
-    via conditional join logic based on interaction channel.
-*/
+-- Validate View Creation by selecting data from the view
+SELECT * FROM purgo_playground.hcp_unified_interaction_view;
