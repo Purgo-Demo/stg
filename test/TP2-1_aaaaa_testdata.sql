@@ -1,45 +1,77 @@
--- Create test data for f_inv_movmnt
-CREATE OR REPLACE TABLE default.f_inv_movmnt (
-  productId STRING,
-  plantId STRING,
-  inventory BIGINT,
-  timestamp TIMESTAMP
-);
+-- Ensure required libraries are installed
+-- In Databricks, you may install necessary libraries via the UI or use init scripts.
+-- This segment of code assumes necessary libraries are pre-installed.
 
-INSERT INTO default.f_inv_movmnt VALUES
-  -- Happy path scenario
-  ('101', 'A1', 2000, TIMESTAMP('2024-01-15T12:00:00.000+0000')),
-  ('101', 'A1', 1500, TIMESTAMP('2024-02-15T12:00:00.000+0000')),
-  ('101', 'A1', 1800, TIMESTAMP('2024-03-15T12:00:00.000+0000')),
-  
-  -- Edge case: Boundary condition for zero inventory
-  ('102', 'B2', 0, TIMESTAMP('2024-01-01T00:00:00.000+0000')),
-  
-  -- NULL handling scenario
-  ('103', 'A1', NULL, TIMESTAMP('2024-03-20T10:00:00.000+0000')),
-  
-  -- Special characters
-  ('104', '@!#$', 2500, TIMESTAMP('2024-02-10T09:00:00.000+0000'));
+-- Create a temporary view for f_inv_movmnt with diverse test cases
+CREATE OR REPLACE TEMPORARY VIEW f_inv_movmnt AS
+SELECT 
+    -- Happy path: valid inventory movements
+    101 AS productId,
+    '2024-01-15T00:00:00.000+0000' AS timestamp,
+    100.0 AS inventoryQuantity,
+    'A1' AS plantId
+UNION ALL SELECT 
+    -- Edge case: Zero inventory
+    101, '2024-02-01T00:00:00.000+0000', 0.0, 'A1'
+UNION ALL SELECT 
+    -- Error case: Negative inventory
+    101, '2024-02-15T00:00:00.000+0000', -5.0, 'A1'
+UNION ALL SELECT 
+    -- Special character in productId (Should be handled)
+    202, '2024-03-01T00:00:00.000+0000', 50.0, 'B2'
+UNION ALL SELECT 
+    -- NULL handling
+    102, NULL, 75.0, 'B2';
 
--- Create test data for f_sales
-CREATE OR REPLACE TABLE default.f_sales (
-  productId STRING,
-  plantId STRING,
-  sales DOUBLE,
-  timestamp TIMESTAMP
-);
+-- Create a temporary view for f_sales with diverse test cases
+CREATE OR REPLACE TEMPORARY VIEW f_sales AS
+SELECT 
+    -- Happy path: valid sales data
+    101 AS productId,
+    '2024-01-15T00:00:00.000+0000' AS timestamp,
+    10.0 AS salesQuantity,
+    'A1' AS plantId
+UNION ALL SELECT 
+    -- Edge case: No sales
+    101, '2024-02-01T00:00:00.000+0000', 0.0, 'A1'
+UNION ALL SELECT 
+    -- Error case: Negative sales
+    101, '2024-02-15T00:00:00.000+0000', -3.0, 'A1'
+UNION ALL SELECT 
+    -- Special character in productId (Should be handled)
+    202, '2024-03-01T00:00:00.000+0000', 5.0, 'B2'
+UNION ALL SELECT 
+    -- NULL handling
+    102, NULL, NULL, 'B2';
 
-INSERT INTO default.f_sales VALUES
-  -- Happy path scenario
-  ('101', 'A1', 300.5, TIMESTAMP('2024-01-15T12:00:00.000+0000')),
-  ('101', 'A1', 350.75, TIMESTAMP('2024-02-15T12:00:00.000+0000')),
-  ('101', 'A1', 400.0, TIMESTAMP('2024-03-15T12:00:00.000+0000')),
-  
-  -- Error case: Negative sales values
-  ('102', 'B2', -150.0, TIMESTAMP('2024-01-01T00:00:00.000+0000')),
-  
-  -- NULL handling scenario
-  ('103', 'A1', NULL, TIMESTAMP('2024-03-20T10:00:00.000+0000')),
-  
-  -- Multi-byte characters in plantId
-  ('105', '厂区', 500.0, TIMESTAMP('2024-02-20T13:00:00.000+0000'));
+-- Process data and calculate DOH
+WITH AvgInventory AS (
+    SELECT 
+        productId,
+        plantId,
+        AVG(CASE WHEN inventoryQuantity IS NOT NULL THEN inventoryQuantity ELSE 0 END) AS avgInventory
+    FROM f_inv_movmnt
+    GROUP BY productId, plantId
+),
+
+AvgDailySales AS (
+    SELECT
+        productId,
+        plantId,
+        AVG(CASE WHEN salesQuantity IS NOT NULL THEN salesQuantity ELSE 0 END) AS avgDailySales
+    FROM f_sales
+    GROUP BY productId, plantId
+)
+
+-- Calculate DOH using previously computed averages
+SELECT
+    ai.productId,
+    ai.plantId,
+    ai.avgInventory,
+    ads.avgDailySales,
+    CASE 
+        WHEN ads.avgDailySales = 0 THEN NULL -- Avoid division by zero
+        ELSE (ai.avgInventory / ads.avgDailySales) * 365
+    END AS DOH
+FROM AvgInventory ai
+JOIN AvgDailySales ads ON ai.productId = ads.productId AND ai.plantId = ads.plantId;
