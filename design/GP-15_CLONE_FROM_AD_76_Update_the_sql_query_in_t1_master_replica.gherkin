@@ -1,0 +1,42 @@
+Feature: Update queries in {{t1_master_replica_clone}} for loading Dutch sales data
+
+  Background:
+    Given the existing table structure in the purgo_playground schema
+    And the presence of the {{t1_master_replica}} table
+
+  Scenario: Prepare {{t1_master_replica_clone}} table
+    Given I drop the table {{t1_master_replica_clone}} if it exists
+    When I create a replica of {{t1_master_replica}} as {{t1_master_replica_clone}}
+    Then the {{t1_master_replica_clone}} should match the structure of the {{t1_master_replica}}
+
+  Scenario Outline: Update {{t1_query}} column for NL country code and specific sequence
+    Given the {{country_cd}} is '<country_cd>' and the {{sequence}} is <sequence>
+    When I update the {{t1_query}} column
+    Then the updated {{t1_query}} for {{t1_master_replica_clone}} should be as expected
+
+    Examples:
+      | country_cd | sequence | expected_query                                                                                                                                                                                                                                                                                                 |
+      | NL         | 1        | "CREATE OR REPLACE TEMP VIEW nl_wholesaler_insert_query AS SELECT Wholesaler_File_Name, Source_System_Name, Source_Product_ID, Source_Product_Description, Brand, Customer_ID, Customer_Name, Post_Code, Net_Sales, Gross_Sales, Packs, Units, Sales_Date, Volume, Country_Code, Bill_to_Customer_ID, Currency_Code, delivery_file_name, CONCAT(Address_Line_1, ' ', City, ' ', State, ' ', Country) AS Full_address FROM purgo_playground.stg_nl_wholesaler;"              |
+      | NL         | 2        | "DELETE FROM purgo_playground.stg_nl_wholesaler WHERE Country_Code = 'NL';"                                                                                                                                                                                                                                       |
+      | NL         | 3        | "INSERT INTO purgo_playground.r_t1_daily_sales SELECT * FROM nl_wholesaler_insert_query;"                                                                                                                                                                                                                        |
+
+  Scenario: Handle missing tables or columns
+    Given a missing table or column
+    When the query fails to execute due to missing table or column
+    Then an error should be logged with message 'Table or column not found: <missing_entity>'
+    And the operation should halt without partial transactions
+
+  Scenario: Verify query execution and data handling
+    Given existing records in the {{r_t1_daily_sales}} for the same data
+    When data is inserted from the {{nl_wholesaler_insert_query}}
+    Then the operation should append the new records, avoiding duplicates
+    And integrity should be maintained in the {{r_t1_daily_sales}} table
+
+  Scenario: Validate performance and error handling
+    Given the SQL operations are initiated
+    When queries are executed
+    Then they should complete within a typical time frame of 5 minutes
+    And logs should capture execution time and potential errors
+    And any error encountered should be logged with details for troubleshooting
+
+
