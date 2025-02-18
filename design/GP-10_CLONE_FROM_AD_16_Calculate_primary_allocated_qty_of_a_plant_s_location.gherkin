@@ -1,0 +1,44 @@
+Feature: Allocated Quantity Calculation for Orders in Inventory Stock Management
+
+  Background:
+    Given the primary table is purgo_playground.f_order
+    And allocated_qty is calculated as the sum of primary_qty, open_qty, shipped_qty, and cancel_qty
+
+  Scenario Outline: Calculate allocated_qty for given order_nbr and order_line_nbr
+    Given an entry exists with <order_nbr> and <order_line_nbr> in purgo_playground.f_order
+    When I retrieve primary_qty, open_qty, shipped_qty, and cancel_qty from the entry
+    Then I add these values to calculate allocated_qty
+    And the result should be stored as allocated_qty for that order
+    Examples:
+      | order_nbr | order_line_nbr | primary_qty | open_qty | shipped_qty | cancel_qty | allocated_qty |
+      | ORDR001   | 001            | 10.0        | 5.0      | 3.0         | 2.0        | 20.0          |
+      | ORDR002   | 001            | 5.0         | 2.0      | 1.0         | 1.0        | 9.0           |
+
+  Scenario Outline: Handle null values in quantity columns
+    Given an entry exists with <order_nbr> and <order_line_nbr> in purgo_playground.f_order
+    When any of primary_qty, open_qty, shipped_qty, or cancel_qty has a null value
+    Then treat the null value as 0.0 for the calculation
+    And add these values to calculate allocated_qty
+    Examples:
+      | order_nbr | order_line_nbr | primary_qty | open_qty | shipped_qty | cancel_qty | allocated_qty |
+      | ORDR003   | 002            | 15.0        | null     | 5.0         | null       | 20.0          |
+      | ORDR004   | 002            | null        | null     | null        | null       | 0.0           |
+
+  Scenario: Error when no entry exists for given order_nbr and order_line_nbr
+    Given no entry exists with order_nbr "ORDR005" and order_line_nbr "003" in purgo_playground.f_order
+    When I attempt to calculate allocated_qty
+    Then an error message should be displayed: "Error: Order number or line number not found in f_order table."
+
+  Scenario: Error handling when SQL dialect is unspecified
+    Given I need to implement SQL logic for a specific SQL platform
+    When the SQL dialect or database management system is not specified
+    Then an error message should be displayed: "Error: SQL dialect not specified. Please provide the database management system details."
+
+  Scenario Outline: Data consistency with historical changes in quantity
+    Given an entry exists with <order_nbr> and <order_line_nbr> in purgo_playground.f_order
+    When a historical change in shipped_qty to <new_shipped_qty> occurs
+    Then update allocated_qty by recalculating with the new shipped_qty value
+    Examples:
+      | order_nbr | order_line_nbr | primary_qty | open_qty | old_shipped_qty | new_shipped_qty | cancel_qty | updated_allocated_qty |
+      | ORDR006   | 001            | 10.0        | 4.0      | 3.0             | 8.0             | 2.0        | 24.0                  |
+      | ORDR007   | 001            | 6.0         | 3.0      | 1.0             | 2.0             | 1.0        | 12.0                  |
