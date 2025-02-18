@@ -1,0 +1,45 @@
+Feature: Mask Last Four Digits of Invoice Number in d_product_revenue_clone
+
+  Background:
+    Given the purgo_playground.d_product_revenue table has records with invoice_number requiring masking
+
+  Scenario: Successfully mask last four digits of invoice_number
+    Given the table purgo_playground.d_product_revenue_clone does not exist
+    When I drop the table purgo_playground.d_product_revenue_clone if it exists
+    And I create a replica of purgo_playground.d_product_revenue as purgo_playground.d_product_revenue_clone
+    And I mask the last four digits of the invoice_number column in purgo_playground.d_product_revenue_clone
+    Then the invoice_number should have the format where the last four digits are replaced with '****'
+
+  Scenario: Error when attempting to drop non-existent clone table
+    Given the table purgo_playground.d_product_revenue_clone does not exist
+    When I attempt to drop the table purgo_playground.d_product_revenue_clone
+    Then I should receive an error message "Table 'purgo_playground.d_product_revenue_clone' does not exist"
+
+  Scenario Outline: Mask invoice_numbers with various lengths
+    Given the table purgo_playground.d_product_revenue_clone is ready for processing
+    When I mask the last four digits of the invoice_number column "<invoice_number>"
+    Then the invoice_number "<original>" should be masked as "<masked>"
+
+    Examples:
+      | original  | masked       |
+      | 12345678  | 1234****     |
+      | 87654321  | 8765****     |
+      | 555555555 | 55555****    |
+
+  Scenario: Error occurs if invoice_number is already masked
+    Given the table purgo_playground.d_product_revenue_clone is ready for processing
+    And an invoice_number is already masked to format with '****'
+    When I attempt to mask the invoice_number again
+    Then I should receive an error message "Invalid operation: invoice_number already masked"
+
+  Scenario: Invalid invoice_number data that cannot be masked
+    Given the table purgo_playground.d_product_revenue_clone is ready for processing
+    And an invoice_number has a length less than four characters "<invalid_invoice>"
+    When I attempt to mask the last four digits
+    Then I should receive an error message "Invalid invoice_number: Cannot mask invoice of length less than 4"
+
+    Examples:
+      | invalid_invoice |
+      | 123             |
+      | 12              |
+      | 1               |
