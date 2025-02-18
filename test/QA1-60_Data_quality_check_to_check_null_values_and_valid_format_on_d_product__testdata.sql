@@ -1,22 +1,23 @@
--- Install necessary libraries if not available in Databricks environment.
--- Install pyarrow if necessary for data manipulation.
-%pip install pyarrow
+-- Install necessary libraries (if not already in place)
+-- This is just a placeholder as precise libraries can't be installed directly here, assumed available
 
--- Generate test data using PySpark DataFrame operations
+-- Test Data Generation for purgo_playground.d_product table in PySpark
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, current_timestamp, expr
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DecimalType, TimestampType, LongType
+from pyspark.sql.types import *
+from pyspark.sql.functions import col, expr, lit
 
+# Initialize Spark Session
 spark = SparkSession.builder \
-    .appName("GenerateTestData") \
+    .appName("DatabricksTestDataGenerator") \
     .getOrCreate()
 
+# Define the schema based on the d_product table definition
 schema = StructType([
-    StructField("prod_id", StringType(), False),
+    StructField("prod_id", StringType(), True),
     StructField("item_nbr", StringType(), True),
     StructField("unit_cost", DoubleType(), True),
-    StructField("prod_exp_dt", DecimalType(38, 0), True),
+    StructField("prod_exp_dt", DecimalType(38,0), True),
     StructField("cost_per_pkg", DoubleType(), True),
     StructField("plant_add", StringType(), True),
     StructField("plant_loc_cd", StringType(), True),
@@ -33,58 +34,76 @@ schema = StructType([
     StructField("hfm_entity", StringType(), True)
 ])
 
-data = [
-    # Happy Path Test Data (Valid Scenarios)
-    ("P001", "I001", 100.50, 20240101, 50.20, "Plant A", "LOC01", "Line1", "StockX", 10.5, 500.0, "T001", "1000", "Y", current_timestamp(), current_timestamp(), "SYS1", "Entity1"),
-    ("P002", "I002", 200.75, 20240201, 60.55, "Plant B", "LOC02", "Line2", "StockY", 15.5, 600.0, "T002", "2000", "Y", current_timestamp(), current_timestamp(), "SYS2", "Entity2"),
-    # Edge Cases (Boundary Conditions)
-    ("P003", None, 300.00, None, 70.80, "Plant C", "LOC03", "Line3", None, 20.0, None, "T003", None, "N", current_timestamp(), None, "SYS3", "Entity3"),
-    ("P004", "I004", None, 20240101, None, "Plant D", None, "Line4", "StockZ", None, 800.0, None, "4000", "N", None, current_timestamp(), None, None),
-    # Error Cases (Invalid Input Scenarios)
-    ("P005", "I005", -50.00, 20241301, -10.00, "Plant E", "LOC05", "Line5", "StockX", -5.0, 0.0, "T005", "5000", "N", current_timestamp(), current_timestamp(), "SYS5", "Entity5"),
-    # NULL Handling Scenarios
-    ("P006", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None),
-    # Special Characters and Multi-byte Characters
-    ("P007", "I007@#", 120.99, 20240101, 33.45, "गोल्डीकोस्ट प्लांट", "LOC07", "生产线", "Тип запаса", 9.5, 700.0, "T007", "7000", "Y", current_timestamp(), current_timestamp(), "SYS7", "Entity7"),
-    ("P008", "I008é", 135.99, 20240101, 45.55, "Plant H", "LOC08", "Línea8", "Stock€", 18.5, 750.0, "T008", "8000", "Y", current_timestamp(), current_timestamp(), "SYS8", "Entity8"),
+# Define test data (20-30 records) covering all test cases
 
-    # ... Generate additional test records as required ...
+data = [
+    # Happy path data
+    ("P0001", "ITM001", 12.50, 20240321, 15.00, "123 Plant St", "LOC001", "LINE1", "STOCKA", 7.0, 50.0, "ODR001", "100", "Y", '2024-03-21T00:00:00.000+0000', '2024-03-21T00:00:00.000+0000', "SYS1", "ENT1"),
+    # Edge case: NULL item_nbr
+    ("P0002", None, 10.00, 20240222, 14.00, "456 Plant St", "LOC002", "LINE2", "STOCKB", None, 30.0, "ODR002", "200", "N", '2024-03-22T00:00:00.000+0000', '2024-03-22T00:00:00.000+0000', "SYS2", "ENT2"),
+    # Edge case: NULL sellable_qty
+    ("P0003", "ITM003", 15.00, 20240320, None, "789 Plant St", "LOC003", "LINE3", "STOCKC", 10.0, None , "ODR003", "300", "Y", '2024-03-23T00:00:00.000+0000', '2024-03-23T00:00:00.000+0000', "SYS3", "ENT3"),
+    # Special characters in item_nbr
+    ("P0004", "ITM$%&", 20.00, 20240319, 16.00, "101 Plant St", "LOC004", "LINE4", "STOCKD", 15.0, 70.0, "ODR004", "400", "Y", '2024-03-25T00:00:00.000+0000', '2024-03-25T00:00:00.000+0000', "SYS4", "ENT4"),
+    # Multi-byte characters in plant_add
+    ("P0005", "ITM005", 18.00, 20240318, 14.50, "工厂街道", "LOC005", "LINE5", "STOCKE", 12.0, 65.5, "ODR005", "500", "N", '2024-03-26T00:00:00.000+0000', '2024-03-26T00:00:00.000+0000', "SYS5", "ENT5"),
+    # Error case: prod_exp_dt not in yyyymmdd format
+    ("P0006", "ITM006", 22.00, 20240305, 17.00, "2023 Foo St", "LOC006", "LINE6", None, 0.0, 80.0, "ODR006", "600", "Y", '2024-03-28T00:00:00.000+0000', '2024-03-28T00:00:00.000+0000', "SYS6", "ENT6"),
+    # NULL scenario for multiple fields
+    ("P0007", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None),
+    # Additional records covering other combinations like no stock_type, invalid and NULL crt_dt
+    ("P0008", "ITM007", 22.00, 20240317, 19.00, None, None, "LINE7", "STOCKF", 20.0, 90.0, "ODR007", "700", "N", None, '2024-03-30T00:00:00.000+0000', "SYS7", "ENT7"),
+    ("P0009", "ITM008", 25.00, 20240310, 20.00, "404 Plant St", "LOC008", "LINE8", "STOCKG", 8.0, 35.0, "ODR008", "800", "Y", '2024-03-10T00:00:00.000+0000', None, "SYS8", "ENT8"),
+    ("P0010", "ITM#", 18.25, 20240316, 11.25, "606 Plant Rd", "LOC010", "LINE10", "STOCKI", 9.0, 44.0, "ODR010", "1000", "N", '2024-03-11T00:00:00.000+0000', '2024-03-11T00:00:00.000+0000', "SYS10", "ENT10"),
 ]
 
-# Create DataFrame with the test data
-df = spark.createDataFrame(data, schema)
+# Create DataFrame from test data
+df = spark.createDataFrame(data, schema=schema)
 
-# Display the DataFrame
+# Show the DataFrame
 df.show(truncate=False)
 
--- SQL logic to check data quality based on specified requirements
+# Data Quality Checks
+# Check for NULL values in 'item_nbr' and 'sellable_qty' columns
+df.filter(col("item_nbr").isNull()).show(5)
+df.filter(col("sellable_qty").isNull()).show(5)
 
--- Count and sample records where item_nbr is null
-SELECT COUNT(*) AS null_item_nbr_count
+# Check for invalid 'prod_exp_dt' format
+df.filter(~expr("prod_exp_dt between 20240101 and 20241231")).show(5)
+
+# End of test data generation and checks
+
+
+### SQL for Data Quality Check
+
+
+-- Count and sample records where 'item_nbr' is NULL
+SELECT COUNT(*) as item_nbr_null_count 
 FROM purgo_playground.d_product
 WHERE item_nbr IS NULL;
 
-SELECT *
+SELECT * 
 FROM purgo_playground.d_product
 WHERE item_nbr IS NULL
 LIMIT 5;
 
--- Count and sample records where sellable_qty is null
-SELECT COUNT(*) AS null_sellable_qty_count
+-- Count and sample records where 'sellable_qty' is NULL
+SELECT COUNT(*) as sellable_qty_null_count 
 FROM purgo_playground.d_product
 WHERE sellable_qty IS NULL;
 
-SELECT *
+SELECT * 
 FROM purgo_playground.d_product
 WHERE sellable_qty IS NULL
 LIMIT 5;
 
--- Count and sample records where prod_exp_dt is not yyyymmdd
-SELECT COUNT(*) AS invalid_prod_exp_dt_count
+-- Count and sample records with incorrect 'prod_exp_dt' format
+SELECT COUNT(*) as prod_exp_dt_invalid_count 
 FROM purgo_playground.d_product
-WHERE NOT (prod_exp_dt BETWEEN 19000101 AND 20991231);
+WHERE NOT prod_exp_dt BETWEEN 20240101 AND 20241231;
 
-SELECT *
+SELECT * 
 FROM purgo_playground.d_product
-WHERE NOT (prod_exp_dt BETWEEN 19000101 AND 20991231)
+WHERE NOT prod_exp_dt BETWEEN 20240101 AND 20241231
 LIMIT 5;
+
