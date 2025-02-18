@@ -1,0 +1,61 @@
+Feature: Data Quality Check for d_product Table
+
+  # Background context for precondition steps
+  Background:
+    Given the d_product table exists in the purgo_playground schema
+
+  # Happy path scenario for checking non-null constraints
+  Scenario: Check non-null values for item_nbr and sellable_qty
+    When I execute SQL query to count null values in column "item_nbr" from "d_product"
+    Then the count should be 0
+    
+    When I execute SQL query to count null values in column "sellable_qty" from "d_product"
+    Then the count should be 0
+
+  # Error scenario for item_nbr being null
+  Scenario: Log records with null item_nbr
+    Given I have records in d_product table
+    When I execute SQL query to get count of records with null "item_nbr"
+    Then display the count of such records
+    And display 5 sample records where "item_nbr" is null
+
+  # Error scenario for sellable_qty being null
+  Scenario: Log records with null sellable_qty
+    Given I have records in d_product table
+    When I execute SQL query to get count of records with null "sellable_qty"
+    Then display the count of such records
+    And display 5 sample records where "sellable_qty" is null
+
+  # Error scenario for prod_exp_dt having an incorrect format
+  Scenario: Validate prod_exp_dt date format
+    Given I have records in d_product table
+    When I execute SQL query to count records where "prod_exp_dt" is not in format yyyymmdd
+    Then display the count of such records
+    And display 5 sample records where "prod_exp_dt" is not in the correct format
+
+  # Scenario Outline for multiple test cases of prod_exp_dt format validation
+  Scenario Outline: Validate prod_exp_dt against multiple formats
+    Given I have records in d_product
+    When I execute a SQL query to validate "prod_exp_dt" with format <format>
+    Then the query should identify records not matching the format <format>
+
+    Examples:
+      | format   |
+      | yyyymmdd |
+
+  # Technical details for SQL validation queries
+  Rule: SQL Validation Rules
+    - "item_nbr" and "sellable_qty" should not be null in the "d_product" table.
+    - "prod_exp_dt" must conform to the numeric date format yyyyMMdd.
+  
+  # Specifying error messages
+  Rule: Error Messages Specifications
+    - If records with null "item_nbr" are found, log message: "Null item_nbr detected in d_product."
+    - If records with null "sellable_qty" are found, log message: "Null sellable_qty detected in d_product."
+    - If records with invalid "prod_exp_dt" are found, log message: "Invalid prod_exp_dt format in d_product."
+  
+  # Validation of acceptance criteria
+  Rule: Acceptance Criteria
+    - No records in "d_product" should have a null "item_nbr" or "sellable_qty".
+    - "prod_exp_dt" must always be in numeric format yyyyMMdd.
+
