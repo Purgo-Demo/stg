@@ -1,109 +1,113 @@
--- Install necessary libraries (if not already in place)
--- This is just a placeholder as precise libraries can't be installed directly here, assumed available
+-- Install necessary libraries if needed
+-- Use only Databricks native data types
 
--- Test Data Generation for purgo_playground.d_product table in PySpark
+-- Create test data for the purgo_playground.d_product table
 
-from pyspark.sql import SparkSession
-from pyspark.sql.types import *
-from pyspark.sql.functions import col, expr, lit
+-- Happy path test data
+CREATE TABLE purgo_playground.d_product_test_happy AS
+SELECT
+  'prod_001' AS prod_id,
+  'item_001' AS item_nbr,
+  50.0 AS unit_cost,
+  20230321 AS prod_exp_dt, -- correct YYYYMMDD format
+  5.0 AS cost_per_pkg,
+  'Address 001' AS plant_add,
+  'LOC1' AS plant_loc_cd,
+  'Line A' AS prod_line,
+  'STK' AS stock_type,
+  30.0 AS pre_prod_days,
+  100.0 AS sellable_qty,
+  'ord_trk_01' AS prod_ordr_tracker_nbr,
+  'max_ord_5' AS max_order_qty,
+  'Y' AS flag_active,
+  '2024-03-21T00:00:00.000+0000' AS crt_dt, -- correct timestamp format
+  '2024-03-21T12:00:00.000+0000' AS updt_dt, -- correct timestamp format
+  'SRC_SYS' AS src_sys_cd,
+  'Entity_1' AS hfm_entity
+UNION ALL
+SELECT
+  'prod_002',
+  'item_002',
+  60.5,
+  20230422, -- correct YYYYMMDD format
+  7.0,
+  'Address 002',
+  'LOC2',
+  'Line B',
+  'STK',
+  45.0,
+  200.0,
+  'ord_trk_02',
+  'max_ord_10',
+  'Y',
+  '2024-04-21T00:00:00.000+0000',
+  '2024-04-21T12:00:00.000+0000',
+  'SRC_SYS',
+  'Entity_2';
 
-# Initialize Spark Session
-spark = SparkSession.builder \
-    .appName("DatabricksTestDataGenerator") \
-    .getOrCreate()
+-- NULL handling scenarios and special characters
+INSERT INTO purgo_playground.d_product_test_happy
+SELECT
+  'prod_003',
+  NULL, -- item_nbr is null
+  80.0,
+  20230520, -- correct YYYYMMDD format
+  12.0,
+  NULL, -- plant_add is NULL
+  NULL, -- plant_loc_cd is NULL
+  NULL, -- prod_line is NULL
+  'CON', -- special stock_type with special characters
+  60.0,
+  NULL, -- sellable_qty is null
+  NULL, -- prod_ordr_tracker_nbr is NULL
+  NULL, -- max_order_qty is NULL
+  'N',
+  NULL, -- crt_dt is NULL
+  NULL, -- updt_dt is NULL
+  'SRC_SYS',
+  'Entity_3';
 
-# Define the schema based on the d_product table definition
-schema = StructType([
-    StructField("prod_id", StringType(), True),
-    StructField("item_nbr", StringType(), True),
-    StructField("unit_cost", DoubleType(), True),
-    StructField("prod_exp_dt", DecimalType(38,0), True),
-    StructField("cost_per_pkg", DoubleType(), True),
-    StructField("plant_add", StringType(), True),
-    StructField("plant_loc_cd", StringType(), True),
-    StructField("prod_line", StringType(), True),
-    StructField("stock_type", StringType(), True),
-    StructField("pre_prod_days", DoubleType(), True),
-    StructField("sellable_qty", DoubleType(), True),
-    StructField("prod_ordr_tracker_nbr", StringType(), True),
-    StructField("max_order_qty", StringType(), True),
-    StructField("flag_active", StringType(), True),
-    StructField("crt_dt", TimestampType(), True),
-    StructField("updt_dt", TimestampType(), True),
-    StructField("src_sys_cd", StringType(), True),
-    StructField("hfm_entity", StringType(), True)
-])
+-- Edge cases, with out-of-range and non-standard values
+INSERT INTO purgo_playground.d_product_test_happy
+SELECT
+  'prod_004',
+  'item_004',
+  -20.0, -- negative unit cost (edge case)
+  1234567, -- non-standard date format
+  -5.0, -- negative cost per pkg (edge case)
+  'Address 004',
+  'LOC4',
+  'Line D',
+  'FRE', -- special characters in stock_type
+  -30.0, -- negative pre_prod_days (edge case)
+  -10.0, -- negative sellable_qty (edge case)
+  'special_ord_trk_@!$', -- special characters in tracker
+  'max_ord_50',
+  'N',
+  '2020-02-29T00:00:00.000+0000', -- leap day test for crt_dt
+  '2020-02-29T12:00:00.000+0000',
+  'SRC_SYS_#@!',
+  'Entity_4';
 
-# Define test data (20-30 records) covering all test cases
+-- SQL logic for data quality check
 
-data = [
-    # Happy path data
-    ("P0001", "ITM001", 12.50, 20240321, 15.00, "123 Plant St", "LOC001", "LINE1", "STOCKA", 7.0, 50.0, "ODR001", "100", "Y", '2024-03-21T00:00:00.000+0000', '2024-03-21T00:00:00.000+0000', "SYS1", "ENT1"),
-    # Edge case: NULL item_nbr
-    ("P0002", None, 10.00, 20240222, 14.00, "456 Plant St", "LOC002", "LINE2", "STOCKB", None, 30.0, "ODR002", "200", "N", '2024-03-22T00:00:00.000+0000', '2024-03-22T00:00:00.000+0000', "SYS2", "ENT2"),
-    # Edge case: NULL sellable_qty
-    ("P0003", "ITM003", 15.00, 20240320, None, "789 Plant St", "LOC003", "LINE3", "STOCKC", 10.0, None , "ODR003", "300", "Y", '2024-03-23T00:00:00.000+0000', '2024-03-23T00:00:00.000+0000', "SYS3", "ENT3"),
-    # Special characters in item_nbr
-    ("P0004", "ITM$%&", 20.00, 20240319, 16.00, "101 Plant St", "LOC004", "LINE4", "STOCKD", 15.0, 70.0, "ODR004", "400", "Y", '2024-03-25T00:00:00.000+0000', '2024-03-25T00:00:00.000+0000', "SYS4", "ENT4"),
-    # Multi-byte characters in plant_add
-    ("P0005", "ITM005", 18.00, 20240318, 14.50, "工厂街道", "LOC005", "LINE5", "STOCKE", 12.0, 65.5, "ODR005", "500", "N", '2024-03-26T00:00:00.000+0000', '2024-03-26T00:00:00.000+0000', "SYS5", "ENT5"),
-    # Error case: prod_exp_dt not in yyyymmdd format
-    ("P0006", "ITM006", 22.00, 20240305, 17.00, "2023 Foo St", "LOC006", "LINE6", None, 0.0, 80.0, "ODR006", "600", "Y", '2024-03-28T00:00:00.000+0000', '2024-03-28T00:00:00.000+0000', "SYS6", "ENT6"),
-    # NULL scenario for multiple fields
-    ("P0007", None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None),
-    # Additional records covering other combinations like no stock_type, invalid and NULL crt_dt
-    ("P0008", "ITM007", 22.00, 20240317, 19.00, None, None, "LINE7", "STOCKF", 20.0, 90.0, "ODR007", "700", "N", None, '2024-03-30T00:00:00.000+0000', "SYS7", "ENT7"),
-    ("P0009", "ITM008", 25.00, 20240310, 20.00, "404 Plant St", "LOC008", "LINE8", "STOCKG", 8.0, 35.0, "ODR008", "800", "Y", '2024-03-10T00:00:00.000+0000', None, "SYS8", "ENT8"),
-    ("P0010", "ITM#", 18.25, 20240316, 11.25, "606 Plant Rd", "LOC010", "LINE10", "STOCKI", 9.0, 44.0, "ODR010", "1000", "N", '2024-03-11T00:00:00.000+0000', '2024-03-11T00:00:00.000+0000', "SYS10", "ENT10"),
-]
+-- Check if 'item_nbr' is not null and return count and sample records
+WITH item_nbr_null AS (
+  SELECT * FROM purgo_playground.d_product WHERE item_nbr IS NULL
+)
+SELECT COUNT(*) AS null_item_nbr_count FROM item_nbr_null;
+SELECT * FROM item_nbr_null LIMIT 5;
 
-# Create DataFrame from test data
-df = spark.createDataFrame(data, schema=schema)
+-- Check if 'sellable_qty' is not null and return count and sample records
+WITH sellable_qty_null AS (
+  SELECT * FROM purgo_playground.d_product WHERE sellable_qty IS NULL
+)
+SELECT COUNT(*) AS null_sellable_qty_count FROM sellable_qty_null;
+SELECT * FROM sellable_qty_null LIMIT 5;
 
-# Show the DataFrame
-df.show(truncate=False)
-
-# Data Quality Checks
-# Check for NULL values in 'item_nbr' and 'sellable_qty' columns
-df.filter(col("item_nbr").isNull()).show(5)
-df.filter(col("sellable_qty").isNull()).show(5)
-
-# Check for invalid 'prod_exp_dt' format
-df.filter(~expr("prod_exp_dt between 20240101 and 20241231")).show(5)
-
-# End of test data generation and checks
-
-
-### SQL for Data Quality Check
-
-
--- Count and sample records where 'item_nbr' is NULL
-SELECT COUNT(*) as item_nbr_null_count 
-FROM purgo_playground.d_product
-WHERE item_nbr IS NULL;
-
-SELECT * 
-FROM purgo_playground.d_product
-WHERE item_nbr IS NULL
-LIMIT 5;
-
--- Count and sample records where 'sellable_qty' is NULL
-SELECT COUNT(*) as sellable_qty_null_count 
-FROM purgo_playground.d_product
-WHERE sellable_qty IS NULL;
-
-SELECT * 
-FROM purgo_playground.d_product
-WHERE sellable_qty IS NULL
-LIMIT 5;
-
--- Count and sample records with incorrect 'prod_exp_dt' format
-SELECT COUNT(*) as prod_exp_dt_invalid_count 
-FROM purgo_playground.d_product
-WHERE NOT prod_exp_dt BETWEEN 20240101 AND 20241231;
-
-SELECT * 
-FROM purgo_playground.d_product
-WHERE NOT prod_exp_dt BETWEEN 20240101 AND 20241231
-LIMIT 5;
-
+-- Check if 'prod_exp_dt' is in the correct format YYYYMMDD and return count and sample records
+WITH prod_exp_dt_invalid AS (
+  SELECT * FROM purgo_playground.d_product WHERE CAST(prod_exp_dt AS STRING) NOT REGEXP '^[0-9]{8}$'
+)
+SELECT COUNT(*) AS invalid_prod_exp_dt_count FROM prod_exp_dt_invalid;
+SELECT * FROM prod_exp_dt_invalid LIMIT 5;
