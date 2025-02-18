@@ -1,56 +1,58 @@
--- Inventory at Risk Calculation based on DNSA Events
+-- Use the designated schema from Unity Catalog
+USE SCHEMA purgo_playground;
 
--- Create a temporary view to calculate the total inventory
-CREATE OR REPLACE TEMP VIEW total_inventory_view AS
-SELECT 
-  SUM(financial_qty) AS total_inventory
-FROM 
-  purgo_playground.f_inv_movmnt; 
+-- Create a temporary view for ease of use in calculations
+CREATE OR REPLACE TEMPORARY VIEW f_inv_movmnt_view AS
+SELECT *
+FROM purgo_playground.f_inv_movmnt;
 
--- Calculate the inventory_at_risk and percentage_of_inventory_at_risk
-SELECT 
-  inventory_at_risk_calculation.inventory_at_risk,
-  (inventory_at_risk_calculation.inventory_at_risk / total_inventory_view.total_inventory) * 100 AS percentage_of_inventory_at_risk
+-- Calculation of Inventory at Risk and Percentage of Inventory at Risk
+-- including handling of possible NULLs and ensuring type consistency
+WITH inventory_at_risk AS (
+  SELECT COALESCE(SUM(financial_qty), 0) AS inventory_at_risk -- Handle possible NULLs
+  FROM f_inv_movmnt_view
+  WHERE flag_active = 'Y'
+),
+total_inventory AS (
+  SELECT COALESCE(SUM(financial_qty), 0) AS total_inventory -- Handle possible NULLs
+  FROM f_inv_movmnt_view
+)
+SELECT inventory_at_risk.inventory_at_risk, 
+  total_inventory.total_inventory, 
+  CASE WHEN total_inventory.total_inventory > 0 THEN 
+    (inventory_at_risk.inventory_at_risk / total_inventory.total_inventory * 100) 
+  ELSE 
+    0.0 
+  END AS percentage_inventory_at_risk -- Handle division by zero
+FROM inventory_at_risk 
+CROSS JOIN total_inventory;
+
+-- Create a Delta table for storing inventory at risk data
+CREATE OR REPLACE TABLE delta.inventory_risk
+USING delta
+AS
+SELECT *,
+  current_timestamp() AS calculation_time -- Add timestamp for tracking
 FROM (
-  SELECT 
-    SUM(CASE WHEN flag_active = 'Y' THEN financial_qty ELSE 0 END) AS inventory_at_risk
-  FROM 
-    purgo_playground.f_inv_movmnt
-  WHERE 
-    flag_active = 'Y'  -- Process only active flags
-) inventory_at_risk_calculation,
-total_inventory_view;
+  SELECT inventory_at_risk.inventory_at_risk, 
+    total_inventory.total_inventory, 
+    CASE WHEN total_inventory.total_inventory > 0 THEN 
+      (inventory_at_risk.inventory_at_risk / total_inventory.total_inventory * 100) 
+    ELSE 
+      0.0 
+    END AS percentage_inventory_at_risk
+  FROM inventory_at_risk 
+  CROSS JOIN total_inventory
+);
 
--- Implement error handling for missing DNSA flag
--- Log and exclude records with missing or null DNSA flags
-SELECT
-  txn_id,
-  inv_loc,
-  financial_qty,
-  flag_active,
-  CASE 
-    WHEN financial_qty IS NULL THEN "Missing financial_qty in record" 
-    WHEN flag_active IS NULL THEN "Missing flag_active in record" 
-    ELSE NULL 
-  END AS error_message
-FROM 
-  purgo_playground.f_inv_movmnt
-WHERE 
-  financial_qty IS NULL OR flag_active IS NULL;
+-- Optimize the delta table
+-- Z-Ordering by inventory_at_risk and percentage_inventory_at_risk may improve query performance
+OPTIMIZE delta.inventory_risk
+ZORDER BY (inventory_at_risk, percentage_inventory_at_risk);
 
--- Example of data skew handling strategy
--- Order by keys predicted to reduce skew for specific queries
--- This is an example and might need adjustments based on actual data distribution
-SELECT 
-  /*+ REPARTITION(100, plant_loc_cd) */  -- Use plant_loc_cd to mitigate skew
-  inv_loc, 
-  item_nbr, 
-  SUM(financial_qty) AS total_qty
-FROM 
-  purgo_playground.f_inv_movmnt
-WHERE 
-  flag_active = 'Y'
-GROUP BY 
-  inv_loc, item_nbr
-ORDER BY 
-  total_qty DESC;
+-- Vacuum the table to remove old files
+-- Consider the compliance and data retention policies before using
+VACUUM delta.inventory_risk RETAIN 0 HOURS;
+
+-- Cleanup temporary views
+DROP VIEW IF EXISTS f_inv_movmnt_view;
