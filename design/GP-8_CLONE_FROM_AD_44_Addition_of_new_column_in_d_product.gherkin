@@ -1,0 +1,58 @@
+Feature: Update d_product table with new column 'source_country'
+
+  Background:
+    Given the table purgo_playground.d_product_clone exists
+    And the view purgo_playground.d_product_vw_clone exists
+
+  Scenario: Successful addition of 'source_country' column
+    Given 'source_country' column does not exist in the purgo_playground.d_product_clone table
+    And 'source_country' column does not exist in the purgo_playground.d_product_vw_clone view
+    When I add a new column 'source_country' to the table purgo_playground.d_product_clone
+    And I hardcode the value 'NL' for all existing rows
+    Then the column 'source_country' should exist in the table purgo_playground.d_product_clone
+    And all rows in the column should have the value 'NL'
+  
+  Scenario: Error in adding an existing column
+    Given 'source_country' column already exists in the purgo_playground.d_product_clone table
+    When I attempt to add 'source_country' column again
+    Then I should receive an error message "Column 'source_country' already exists in the table."
+
+  Scenario Outline: Verify correct addition of 'source_country' column across related views
+    Given the 'source_country' column is added to the purgo_playground.d_product_clone table
+    When the same column is added to the dependent view <view_name> 
+    Then the view <view_name> should reflect the new column 'source_country' with value 'NL'
+
+    Examples:
+      | view_name                       |
+      | purgo_playground.d_product_vw_clone |
+
+  Scenario: View update error
+    Given the view purgo_playground.d_product_vw_clone
+    When I attempt to add a column without updating the dependent table first
+    Then I should receive an error message "View update failed due to missing column in base table."
+
+  Scenario: Database dependencies and triggers check before alteration
+    Given I have checked with the DBA or Data Engineer
+    When clarifications about dependencies and triggers related to purgo_playground.d_product are required
+    Then verify no triggers or dependent tables/views are disrupted
+
+  Scenario: Confirm no unforeseen impacts on other systems
+    Given the update proposal for purgo_playground.d_product
+    When an impact analysis is conducted with the Data Architect
+    Then ensure no critical impacts on other tables or interconnected systems
+
+  Scenario: Clean up after tests
+    Given the test is complete
+    When cleanup actions are required
+    Then drop the purgo_playground.d_product_clone table if tests are successful
+    And drop the purgo_playground.d_product_vw_clone view if tests are successful
+
+  Scenario Outline: Validate all system behavior after column addition
+    Given the d_product table has been replicated and new column addition is successful
+    When querying the updated table and associated view <view_name>
+    Then ensure all values align with the expected column addition
+
+    Examples:
+      | view_name                       |
+      | purgo_playground.d_product_vw_clone |
+
