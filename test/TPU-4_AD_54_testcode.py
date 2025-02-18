@@ -1,6 +1,6 @@
 # Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, to_date, row_number, when
+from pyspark.sql.functions import col, lit, to_date, row_number
 from pyspark.sql.window import Window
 import pyspark.sql.types as T
 
@@ -50,7 +50,8 @@ exceptions_df = sales_cast_df \
         (col("sales_date").isNull()) |
         (col("row_num") > 1)
     ) \
-    .withColumn("validation_errors", when(col("Country_cd").isNull() | col("Country_cd") == "", "country_cd should not be null")
+    .withColumn("validation_errors", 
+        lit("country_cd should not be null").when(col("Country_cd").isNull() | col("Country_cd") == "", "country_cd should not be null")
         .when(~col("qty_sold").cast("string").rlike("^[0-9]+$"), "qty_sold should be numeric")
         .when(col("row_num") > 1, "product_id should not be duplicate")
         .when(col("sales_date").isNull(), "Date should be in yyyy-mm-dd format")
