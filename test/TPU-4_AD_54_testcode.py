@@ -1,42 +1,76 @@
-# Import necessary libraries
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, isnan, rlike
-from pyspark.sql.types import StructType, StructField, StringType, DecimalType
+from pyspark.sql.functions import col, when, lit, date_format, to_date, expr
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType, DateType
 
-# Start Spark session
-spark = SparkSession.builder.appName("SalesDataValidation").getOrCreate()
+# Initialize Spark Session
+spark = SparkSession.builder \
+    .appName("Sales Data Quality Check") \
+    .enableHiveSupport() \
+    .getOrCreate()
 
-# Define schema for the sales data
+# Define schemas for validation
 sales_schema = StructType([
-    StructField("Country_cd", StringType(), True),
-    StructField("Product_id", StringType(), True),
-    StructField("qty_sold", DecimalType(10,0), True),
-    StructField("sales_date", StringType(), True)
+    StructField("Country_cd", StringType(), nullable=True),
+    StructField("Product_id", StringType(), nullable=False),
+    StructField("qty_sold", DecimalType(10, 0), nullable=True),
+    StructField("sales_date", DateType(), nullable=False)
 ])
 
-# Load the sales file from DBFS
-sales_df = spark.read.option("header", "true").schema(sales_schema).csv("dbfs:/FileStore/tables/sales_20240611.csv")
+exception_schema = StructType([
+    StructField("Country_cd", StringType(), nullable=True),
+    StructField("Product_id", StringType(), nullable=False),
+    StructField("qty_sold", StringType(), nullable=True),
+    StructField("sales_date", StringType(), nullable=False),
+    StructField("validation_errors", StringType(), nullable=False)
+])
 
-# Add validation columns for error detection
-validations_df = sales_df.withColumn("validation_errors", when(col("Country_cd").isNull() | (col("Country_cd") == ""), "Missing country_cd")
-                                                  .when(isnan(col("qty_sold")) | col("qty_sold").cast(DecimalType(10,0)).isNull(), "qty_sold should be numeric")
-                                                  .when(~col("sales_date").rlike("^\d{4}-\d{2}-\d{2}$"), "sales_date should be in yyyy-mm-dd format"))
+# Load sales data from CSV file
+df_sales = spark.read \
+    .option("header", "true") \
+    .option("inferSchema", "true") \
+    .csv("dbfs:/FileStore/tables/sales_20240611.csv") \
+    .select("Country_cd", "Product_id", "qty_sold", "sales_date")
 
-# Detect duplicate product IDs
-duplicate_products_df = sales_df.groupBy("Product_id").count().filter(col("count") > 1).select("Product_id")
-duplicates_df = sales_df.join(duplicate_products_df, on="Product_id", how="inner").withColumn("validation_errors", when(col("Product_id").isNotNull(), "Duplicate Product_id"))
+# Convert sales_date to date type for validation
+df_sales = df_sales.withColumn("sales_date", to_date(col("sales_date"), "yyyy-MM-dd"))
 
-# Union validations and duplicates to get exception records
-errors_df = validations_df.union(duplicates_df).filter(col("validation_errors").isNotNull())
+# Define rules to identify invalid records
+df_with_errors = df_sales.withColumn("validation_errors", lit(None).cast("string"))
 
-# Write exceptions to sales_exceptions table, handling schema dynamically
-errors_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales_exceptions")
+# Validate that country_cd is not null
+df_with_errors = df_with_errors.withColumn("validation_errors", 
+    when(col("Country_cd").isNull(), lit("Country_cd is null"))
+    .otherwise(col("validation_errors"))
+)
 
-# Filter valid records by subtracting errors
-valid_sales_df = sales_df.subtract(errors_df.drop("validation_errors"))
+# Validate that product_id is unique
+df_duplicates = df_sales.groupBy("Product_id").count().filter(col("count") > 1).select("Product_id")
+df_with_errors = df_with_errors.withColumn("validation_errors", 
+    when(col("Product_id").isin([row.Product_id for row in df_duplicates.collect()]), lit("Duplicate Product_id"))
+    .otherwise(col("validation_errors"))
+)
 
-# Write valid sales records to the sales table, handling schema dynamically
-valid_sales_df.write.option("mergeSchema", "true").mode("append").format("delta").saveAsTable("purgo_playground.sales")
+# Validate that qty_sold is numeric
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(~col("qty_sold").cast("decimal(10,0)").isNotNull(), lit("qty_sold is not numeric"))
+    .otherwise(col("validation_errors"))
+)
 
-# Stop Spark session
-spark.stop()
+# Validate that sales_date is in yyyy-mm-dd format
+df_with_errors = df_with_errors.withColumn("validation_errors",
+    when(col("sales_date").isNull(), lit("sales_date format is incorrect"))
+    .otherwise(col("validation_errors"))
+)
+
+# Separate valid and error records
+df_valid_records = df_with_errors.filter(col("validation_errors").isNull()).drop("validation_errors").select(*sales_schema.fieldNames())
+df_error_records = df_with_errors.filter(col("validation_errors").isNotNull()).select(*exception_schema.fieldNames())
+
+# Write valid records to the sales table with mergeSchema=true
+df_valid_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales")
+
+# Write error records to the sales_exceptions table with mergeSchema=true
+df_error_records.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable("purgo_playground.sales_exceptions")
+
+# Cleanup operations (drop temporary datasets if required)
+spark.catalog.clearCache()
