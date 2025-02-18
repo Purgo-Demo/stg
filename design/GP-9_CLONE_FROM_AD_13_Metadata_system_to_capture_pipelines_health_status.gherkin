@@ -1,0 +1,84 @@
+Feature: Metadata System for Data Pipeline Health Status
+
+  Background:
+    Given the following tables exist in the purgo_playground schema:
+    | Table Name          |
+    | batch               |
+    | batchrun            |
+    | job                 |
+    | jobrun              |
+    | jobarguments        |
+
+  Scenario: Re-creation of Metadata Tables
+    Given I am connected to the purgo_playground schema
+    When I drop the existing tables `batch`, `batchrun`, `job`, `jobrun`, `jobarguments`
+    Then I recreate the tables using the provided DDLs
+
+  Scenario Outline: Successful Insertion into Batch Table
+    Given a new batch with batch_id <batch_id> and batch_name "<batch_name>"
+    When the batch is created with description "<description>" and active_status "<active_status>"
+    Then the batch should be stored in the batch table
+
+    Examples:
+      | batch_id | batch_name  | description       | active_status |
+      | 1        | Batch A     | Initial Batch     | active        |
+      | 2        | Batch B     | Secondary Batch   | inactive      |
+
+  Scenario Outline: BatchRun Table Insertion and Validation
+    Given an existing batch with batch_id <batch_id>
+    When a new batch run is created with batchrun_id <batchrun_id>, execution_date "<execution_date>", and status "<status>"
+    Then it should be inserted into the batchrun table
+
+    Examples:
+      | batchrun_id | batch_id | execution_date | status   |
+      | 101         | 1        | 2023-10-01     | success  |
+      | 102         | 2        | 2023-10-02     | failed   |
+
+  Scenario Outline: Job Table Entry with Foreign Key Integrity
+    Given an existing batch with batch_id <batch_id>
+    When a new job is created with job_id <job_id>, job_name "<job_name>", description "<description>", job_type "<job_type>", and active_status "<active_status>"
+    Then it should maintain the foreign key reference to the batch table
+
+    Examples:
+      | job_id | job_name | description      | job_type | active_status | batch_id |
+      | 501    | Job One  | ETL Process      | ETL      | active        | 1        |
+      | 502    | Job Two  | Data Analysis    | Analysis | inactive      | 2        |
+
+  Scenario Outline: Error Handling for Invalid Foreign Key Reference
+    Given a batch_id <batch_id> that does not exist
+    When attempting to insert into batchrun or job with this batch_id
+    Then an error message should be displayed: "<error_message>"
+
+    Examples:
+      | batch_id | error_message                                     |
+      | 99       | Foreign key constraint failed for batch_id: 99    |
+
+  Scenario: Validate Job Execution Log in JobRun Table
+    Given a job_run with job_run_id 701, job_id 501, batchrun_id 101 on execution_date "2023-10-01" and status "success"
+    When the log_message is "<log_message>"
+    Then it should be correctly stored in the jobrun table with the message "<log_message>"
+
+    Examples:
+      | log_message                        |
+      | Execution completed without errors |
+
+  Scenario Outline: Argument Details for Job Arguments Table
+    Given an existing job with job_id <job_id>
+    When a new argument is added with argument_id <argument_id>, argument_name "<argument_name>", and argument_value "<argument_value>"
+    Then it should be stored in the jobarguments table
+
+    Examples:
+      | argument_id | job_id | argument_name | argument_value |
+      | 801         | 501    | input_path    | /data/input/   |
+      | 802         | 502    | output_format | csv            |
+
+  Scenario: Error Scenario for Duplicate Primary Key
+    Given duplicate batchrun_id 101 for a new batch run
+    When trying to insert it into the batchrun table
+    Then an error message should be displayed: "Primary key constraint violated: batchrun_id 101"
+
+  Scenario: ER Diagram and DDL Generation
+    Given the metadata tables have been defined
+    When generating the ER diagram and Databricks SQL DDLs
+    Then they reflect the correct relationships and constraints among the tables
+
