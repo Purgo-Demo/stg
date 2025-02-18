@@ -1,17 +1,19 @@
-# PySpark setup for generating test data
-
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, DecimalType, TimestampType
+from pyspark.sql.functions import lit, col, expr, when
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
 
-spark = SparkSession.builder.appName("Test Data Generation").getOrCreate()
+# Create a Spark session
+spark = SparkSession.builder \
+    .appName("DatabricksTestDataGeneration") \
+    .getOrCreate()
 
-# Define schema for the test data based on the purgo_playground.f_inv_movmnt table
-f_inv_movmnt_schema = StructType([
+# Define schema for test data
+schema = StructType([
     StructField("txn_id", StringType(), True),
     StructField("inv_loc", StringType(), True),
     StructField("financial_qty", DoubleType(), True),
     StructField("net_qty", DoubleType(), True),
-    StructField("expired_qt", DecimalType(38, 0), True),
+    StructField("expired_qt", DoubleType(), True),
     StructField("item_nbr", StringType(), True),
     StructField("unit_cost", DoubleType(), True),
     StructField("um_rate", DoubleType(), True),
@@ -20,33 +22,55 @@ f_inv_movmnt_schema = StructType([
     StructField("stock_type", StringType(), True),
     StructField("qty_on_hand", DoubleType(), True),
     StructField("qty_shipped", DoubleType(), True),
-    StructField("cancel_dt", DecimalType(38, 0), True),
+    StructField("cancel_dt", DoubleType(), True),
     StructField("flag_active", StringType(), True),
     StructField("crt_dt", TimestampType(), True),
     StructField("updt_dt", TimestampType(), True)
 ])
 
-# Generate the DataFrame with test data
-test_data = [
-    # Happy path test data
-    ("txn_001", "loc_001", 100.0, 95.0, 0, "item_001", 10.0, 1.0, "loc_cd_001", "ref_001", "type_001", 500.0, 5.0, 20210321, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    ("txn_002", "loc_002", 200.0, 190.0, 0, "item_002", 20.0, 1.0, "loc_cd_002", "ref_002", "type_002", 700.0, 10.0, 20220321, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
+# Generate test data
+data = [
+    # Happy Path
+    ("txn1001", "loc01", 1000.0, 800.0, 0.0, "item001", 50.0, 1.2, "PL01", "ref001", "A", 1200.0, 200.0, None, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
+    ("txn1002", "loc01", 2000.0, 1500.0, 0.0, "item002", 30.0, 1.5, "PL01", "ref002", "B", 2500.0, 100.0, None, "N", "2024-03-22T00:00:00.000+0000", "2024-03-22T00:00:00.000+0000"),
     
-    # Edge case data
-    ("txn_003", "loc_003", 0.0, -5.0, 0, "item_003", 0.01, 1.0, "loc_cd_003", "ref_003", "type_003", 50.0, 0.0, 20230321, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
-    ("txn_004", "loc_004", 999999.99, 999999.99, 0, "item_004", 9999.99, 1.0, "loc_cd_004", "ref_004", "type_004", 50000.0, 0.0, 20240121, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
+    # Edge Cases
+    ("txn1003", "loc02", 0.0, 0.0, 0.0, "item003", 10.0, 0.0, "PL02", "ref003", "C", 0.0, 0.0, None, "Y", "2024-03-23T00:00:00.000+0000", "2024-03-23T00:00:00.000+0000"),
+    ("txn1004", "loc02", 9999999999.99, 999999999.99, 0.0, "item004", 100000.0, 1000.0, "PL02", "ref004", "D", 10000000000.0, 1000.0, None, "N", "2024-03-24T00:00:00.000+0000", "2024-03-24T00:00:00.000+0000"),
     
-    # Error cases
-    ("txn_005", "loc_005", -10.0, 0.0, 0, "item_005", -5.0, 1.0, "loc_cd_005", "ref_005", "type_005", -500.0, -5.0, 20240122, "N", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000"),
+    # Error Cases
+    ("txn1005", "loc03", -100.0, 50.0, 0.0, "item005", -20.0, 0.5, "PL03", "ref005", "E", -150.0, 0.0, None, "Y", "2024-03-25T00:00:00.000+0000", "2024-03-25T00:00:00.000+0000"),
+    ("txn1006", "loc03", 500.0, 500.0, 0.0, "item006", 0.0, 0.0, "PL03", "ref006", "F", 500.0, 500.0, None, "Z", "2024-03-26T00:00:00.000+0000", "2024-03-26T00:00:00.000+0000"), # Unsupported flag
     
-    # NULL handling scenarios
-    (None, "loc_006", None, 100.0, None, "item_006", None, None, "loc_cd_006", None, "type_006", None, None, None, None, None, None),
+    # NULL Handling
+    ("txn1007", None, 300.0, None, None, "item007", None, 1.0, None, None, None, None, None, None, None, None, None),
+    ("txn1008", "loc04", None, 200.0, 0.0, "item008", 40.0, 1.1, "PL04", "ref008", "G", 250.0, None, None, "Y", None, "2024-03-27T00:00:00.000+0000"),
     
-    # Special characters and multi-byte characters
-    ("txn_007", "loc_漢字", 500.0, 480.0, 0, "アイテム_007", 50.0, 1.0, "loc_cd_汉字", "ref_漢字", "type_漢字", 200.0, 20.0, 20231010, "Y", "2024-03-21T00:00:00.000+0000", "2024-03-21T00:00:00.000+0000")
+    # Special Characters and Multi-byte Characters
+    ("txn1009", "loc05", 700.0, 600.0, 0.0, "item🔥009", 60.0, 1.6, "PL05", "ref🔥009", "H", 1300.0, 700.0, None, "Y", "2024-03-28T00:00:00.000+0000", "2024-03-28T00:00:00.000+0000"),
+    ("txn1010", "loc05", 800.0, 700.0, 0.0, "item你好010", 70.0, 1.7, "PL05", "ref你好010", "I", 1500.0, 800.0, None, "N", "2024-03-29T00:00:00.000+0000", "2024-03-29T00:00:00.000+0000")
 ]
 
-f_inv_movmnt_df = spark.createDataFrame(test_data, schema=f_inv_movmnt_schema)
+# Create DataFrame
+df = spark.createDataFrame(data, schema)
 
-# Display the data frame
-f_inv_movmnt_df.show(truncate=False)
+# Show the DataFrame
+df.show(truncate=False)
+
+# Calculate Inventory at Risk
+inventory_at_risk_df = df.filter(col("flag_active") == "Y") \
+    .agg(expr("sum(financial_qty) as inventory_at_risk"))
+
+# Calculate Total Inventory
+total_inventory_df = df.agg(expr("sum(financial_qty) as total_inventory"))
+
+# Join the two calculated dataframes for final output
+risk_calculation_df = inventory_at_risk_df.crossJoin(total_inventory_df) \
+    .withColumn("percentage_inventory_at_risk", expr("inventory_at_risk / total_inventory * 100"))
+
+# Show Risk Calculation
+risk_calculation_df.show(truncate=False)
+
+# Output Schema and Data Types check
+print("DataFrame Schema:")
+df.printSchema()
