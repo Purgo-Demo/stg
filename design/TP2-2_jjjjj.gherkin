@@ -1,54 +1,48 @@
-Feature: Unity Catalog Management System
+Feature: Calculation of Days on Hand (DOH) for Supply Chain Management
 
   Background:
-    Given the Unity Catalog system is deployed
-    And the user has administrative access
+    Given the Unity Catalog schema is purgo_playground
+    And tables for inventory and sales data are available in multiple schemas
+    And relevant data includes active transactions only
 
-  Scenario: Add a new dataset to Unity Catalog
-    Given a new dataset named "Sales2023.csv" is available in the source location
-    When the admin user selects "Add Dataset" in the Unity Catalog
-    And enters the dataset name as "Sales2023.csv"
-    And specifies data format as "csv"
-    And sets the schema as "SalesDataSchema"
-    Then the dataset should be added to the Unity Catalog
-    And a confirmation message "Dataset 'Sales2023.csv' added successfully" should be displayed
+  Scenario: Calculate Average Inventory Over a Quarter
+    Given inventory movement data from tables bien_schemaf_inv_movmnt, f_inv_movmnt, and quang_schemaf_inv_movmnt
+    When the average inventory level is computed by averaging qty_on_hand where flag_active is 'Y'
+    Then the result should be calculated for each item_nbr and plant_loc_cd
 
-  Scenario: Error when adding a dataset with missing schema
-    Given a new dataset named "Revenue2023.csv" is available in the source location
-    When the admin user selects "Add Dataset" in the Unity Catalog
-    And enters the dataset name as "Revenue2023.csv"
-    And specifies data format as "csv"
-    And does not set a schema
-    Then an error message "Schema must be specified for dataset 'Revenue2023.csv'." should be displayed
+  Scenario: Calculate Average Daily Sales Over a Quarter
+    Given sales data from tables bien_schemaf_sales, f_sales, and quang_schemaf_sales
+    When the average daily sales is computed by averaging qty_sold over business days in the quarter
+    Then the result should consider only records where flag_cancel is 'N' and flag_return is 'N'
 
-  Scenario: Search for a dataset in Unity Catalog
-    Given the dataset "Customer2023.csv" is present in the Unity Catalog
-    When the user searches for "Customer2023"
-    Then the dataset "Customer2023.csv" should appear in the search results
-
-  Scenario Outline: Validate dataset format during upload
-    Given a new dataset named "<DatasetName>" is available in the source location
-    When the admin user selects "Add Dataset" in the Unity Catalog
-    And enters the dataset name as "<DatasetName>"
-    And specifies data format as "<Format>"
-    Then the system should validate the dataset format
-    And an error message "<ErrorMessage>" should be displayed
+  Scenario Outline: Calculate DOH for Each Item and Plant Location
+    Given calculated average inventory <avg_inventory> and average daily sales <avg_daily_sales>
+    When DOH is calculated using the formula (Average Inventory / Average Daily Sales) * 365
+    Then DOH should be captured in the doh_metrics table with columns item_nbr, avg_inventory, avg_daily_sales, doh
 
     Examples:
-      | DatasetName   | Format  | ErrorMessage                                                  |
-      | Inventory2023 | txt     | "Unsupported data format 'txt' for dataset 'Inventory2023'."  |
-      | Products2023  | xml     | "Unsupported data format 'xml' for dataset 'Products2023'."   |
+      | avg_inventory | avg_daily_sales |
+      | 100           | 5               |
+      | 200           | 10              |
+      | 150           | 7.5             |
 
-  Scenario: Update dataset metadata
-    Given the dataset "Employee2023.csv" exists in the Unity Catalog
-    When the admin user selects "Update Metadata" for "Employee2023.csv"
-    And updates the description to "2023 Employee Data"
-    Then the metadata for "Employee2023.csv" should be updated successfully
-    And a confirmation message "Metadata updated for 'Employee2023.csv'." should be displayed
+  Scenario: Validate DOH Metrics Calculation
+    Given the doh_metrics table with calculated DOH values
+    When aggregating DOH values to calculate avg_doh and stddev_doh
+    Then the values are inserted into the doh_kpis table with columns avg_doh, stddev_doh
 
-  Scenario: Delete a dataset from Unity Catalog
-    Given the dataset "OldSalesData.csv" exists in the Unity Catalog
-    When the admin user selects "Delete" for "OldSalesData.csv"
-    And confirms the deletion
-    Then the dataset "OldSalesData.csv" should be removed from the Unity Catalog
-    And a confirmation message "Dataset 'OldSalesData.csv' deleted successfully" should be displayed
+  Scenario Outline: Error Handling for Invalid Data Inputs
+    Given sales data where qty_sold <invalid_qty> occurs
+    When calculating average daily sales
+    Then a validation error message should be reported with "Invalid sales quantity: <invalid_qty>"
+
+    Examples:
+      | invalid_qty |
+      | -10         |
+      | -5          |
+      | null        |
+
+  Scenario: Handle Data from Multiple Schemas and Table Versions
+    Given inventory and sales data for multiple schemas: bien_schemaf_, f_, and quang_schemaf_
+    When consistent data retrieval methods are applied across schemas
+    Then data consistency and integrity must be maintained by using the latest versions of respective tables
