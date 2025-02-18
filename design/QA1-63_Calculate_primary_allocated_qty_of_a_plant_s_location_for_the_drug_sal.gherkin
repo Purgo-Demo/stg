@@ -1,0 +1,52 @@
+Feature: Display Allocated Quantity for Orders in Inventory Stock Management
+
+  Background:
+    Given the leading table is "purgo_playground.f_order"
+    And allocated_qty is calculated using primary_qty, open_qty, shipped_qty, and cancel_qty
+    And allocated_qty is primary_qty + open_qty + shipped_qty - cancel_qty
+
+  Scenario: Display Allocated Quantity for Specific Orders
+    Given there are records in "purgo_playground.f_order" with order_nbr and order_line_nbr
+    When I query the "purgo_playground.f_order" table
+    Then I should see order_nbr and allocated_qty calculated as primary_qty + open_qty + shipped_qty - cancel_qty
+
+  Scenario Outline: Validate Allocated Quantity Calculation for Various Orders
+    Given the following data in the "purgo_playground.f_order" table:
+      | order_nbr | order_line_nbr | primary_qty | open_qty | shipped_qty | cancel_qty |
+      Examples:
+        | O123     | L001           | 100.0       | 50.0     | 30.0        | 20.0       |
+        | O456     | L002           | 200.0       | 20.0     | 10.0        | 15.0       |
+    When I calculate allocated_qty using the formula primary_qty + open_qty + shipped_qty - cancel_qty
+    Then the calculated allocated_qty should be as follows:
+      | order_nbr | allocated_qty |
+      Examples:
+        | O123     | 160.0         |
+        | O456     | 215.0         |
+
+  Scenario: Error Scenario - Negative Allocated Quantity
+    Given an order "O789" with primary_qty = 10.0, open_qty = 5.0, shipped_qty = 3.0, and cancel_qty = 20.0
+    When I calculate the allocated_qty using the formula primary_qty + open_qty + shipped_qty - cancel_qty
+    Then I should receive an error message "Allocated Quantity cannot be negative."
+
+  Scenario: Error Scenario - Missing Quantities
+    Given an order "O101" exists without primary_qty, open_qty, or shipped_qty values
+    When I attempt to calculate allocated_qty
+    Then I should receive an error message "Cannot calculate allocated quantity due to missing data."
+
+  Scenario: Error Scenario - Invalid Data Formats
+    Given an order "O202" with invalid primary_qty format (non-numeric value)
+    When I attempt to calculate allocated_qty
+    Then I should receive an error message "Invalid data format for quantity values."
+
+  Scenario Outline: Validate Edge Cases for Allocated Quantity Calculation
+    Given the following edge case data in the "purgo_playground.f_order" table:
+      | order_nbr | order_line_nbr | primary_qty | open_qty | shipped_qty | cancel_qty |
+      Examples:
+        | O303     | L003           | 0.0         | 0.0      | 0.0         | 0.0        |
+        | O404     | L004           | 0.0         | 0.0      | 0.0         | 10.0       |
+    When I calculate allocated_qty using the formula primary_qty + open_qty + shipped_qty - cancel_qty
+    Then the calculated allocated_qty should be as follows:
+      | order_nbr | allocated_qty |
+      Examples:
+        | O303     | 0.0           |
+        | O404     | -10.0         |
